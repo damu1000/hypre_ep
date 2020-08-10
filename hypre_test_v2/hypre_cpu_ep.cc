@@ -18,7 +18,7 @@ mpicxx hypre_test.cc -std=c++11 -I$(HYPRE_PATH)/include/ -L$(HYPRE_PATH)/lib -lH
 mpicxx 2_hypre_gpu.cc -std=c++11 -I/home/damodars/uintah_kokkos_dev/hypre_kokkos/src/build/include/ -L/home/damodars/uintah_kokkos_dev/hypre_kokkos/src/build/lib -lHYPRE -g -O3 -I$KOKKOS_PATH/build/include -L$KOKKOS_PATH/build/lib -lkokkos --expt-extended-lambda -o gpu -arch=sm_52 
 
 
-mpicxx hypre_cpu_ep.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src/ -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -g -O3 -o 2_ep -fopenmp
+ mpicxx hypre_cpu_ep.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src/ -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2  -g -O3 -o 2_ep -fopenmp
 
  */
 
@@ -63,6 +63,7 @@ double tolerance = 1.e-25;
 char **argv;
 int argc;
 
+
 typedef struct IntVector
 {
 	int value[3]; //x: 0, y:1, z:2. Loop order z, y, x. x changes fastest.
@@ -94,22 +95,23 @@ int get_affinity() {
 std::vector<int> g_patch_proc;
 
 //as of now using simple logic of serial assignment
-void assignPatchToProc(int x_patches, int y_patches, int z_patches, int num_of_ranks){
-	int patch=0, rank=0;
-	int number_of_patches = x_patches * y_patches * z_patches; 
+void assignPatchToProc(xmlInput input, int rank, int size, int num_of_threads){
+	int num_of_ranks = size * num_of_threads; // this number of end points
+	int patch=0;
+	int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
 	int patches_per_rank = number_of_patches / num_of_ranks;
 
-	g_patch_proc.resize(x_patches * y_patches * z_patches);
+	g_patch_proc.resize(input.xpatches * input.ypatches * input.zpatches);
 
-	for(int i=0; i<z_patches; i++)
-	for(int j=0; j<y_patches; j++)
-	for(int k=0; k<x_patches; k++){
+	for(int i=0; i<input.zpatches; i++)
+	for(int j=0; j<input.ypatches; j++)
+	for(int k=0; k<input.xpatches; k++){
 		g_patch_proc[patch++] = rank;
 		if(patch % patches_per_rank == 0) rank++;
 	}
 
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	/*if(rank==0)
+	/*MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	if(rank==0)
 		for(int i=0; i<g_patch_proc.size(); i++)
 			printf("patch assignment: %d %d\n", i, g_patch_proc[i]);*/
 }
@@ -155,12 +157,12 @@ void findNeighbors(std::vector<RankDir> & neighbors, std::vector<int>& my_patche
 	
 }
 
-void hypre_solve(const char * exp_type, int patch_dim, int x_patches, int y_patches, int z_patches)
+void hypre_solve(const char * exp_type, xmlInput input)
 {
 
 	//--------------------------------------------------------- init ----------------------------------------------------------------------------------------------
 
-	int number_of_patches = x_patches * y_patches * z_patches; 
+	int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
 
 	
 	HYPRE_Init(argc, argv);
@@ -174,7 +176,7 @@ void hypre_solve(const char * exp_type, int patch_dim, int x_patches, int y_patc
 		exit(1);
 	}
 
-	int num_cells = number_of_patches*patch_dim*patch_dim*patch_dim;
+	int num_cells = number_of_patches*input.patch_size*input.patch_size*input.patch_size;
 
 	thread_local extern double _hypre_comm_time;
 	//----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -186,12 +188,12 @@ void hypre_solve(const char * exp_type, int patch_dim, int x_patches, int y_patc
 	getMyPatches( my_patches, rank );
 
 	std::vector<RankDir> neighbors;
-  findNeighbors(neighbors, my_patches, x_patches, y_patches, z_patches, rank); //assuming EP.
+	findNeighbors(neighbors, my_patches, input.xpatches, input.ypatches, input.zpatches, rank); //assuming EP.
 
 	createCommMap(neighbors.data(), neighbors.size());	//in hypre_mpi_ep_helper.h
 
 	int patches_per_rank = my_patches.size();
-	int x_dim = patch_dim, y_dim = patch_dim, z_dim = patch_dim;
+	int x_dim = input.patch_size, y_dim = input.patch_size, z_dim = input.patch_size;
 
 	std::vector<IntVector> low(patches_per_rank), high(patches_per_rank);	//store boundaries of every patch
 
@@ -200,16 +202,16 @@ void hypre_solve(const char * exp_type, int patch_dim, int x_patches, int y_patc
 		//patch id based on local patch number (i) + starting patch assigned to this rank.
 		int patch_id = my_patches[i];
 
-		// convert patch_id into 3d patch co-cordinates. Multiply by patch_dim to get starting cell of patch.
-		low[i].value[0] = x_dim * (patch_id % x_patches);
-		low[i].value[1] = y_dim * ((patch_id / x_patches) % y_patches);
-		low[i].value[2] = z_dim * ((patch_id / x_patches) / y_patches);
+		// convert patch_id into 3d patch co-cordinates. Multiply by patch_size to get starting cell of patch.
+		low[i].value[0] = x_dim * (patch_id % input.xpatches);
+		low[i].value[1] = y_dim * ((patch_id / input.xpatches) % input.ypatches);
+		low[i].value[2] = z_dim * ((patch_id / input.xpatches) / input.ypatches);
 
-		// add patch_dim to low to get end cell of patch. subtract 1 as hypre uses inclusive boundaries... as per Uintah code
+		// add patch_size to low to get end cell of patch. subtract 1 as hypre uses inclusive boundaries... as per Uintah code
 		high[i].value[0] = low[i].value[0] + x_dim - 1; //including high cell. hypre needs so.. i guess
 		high[i].value[1] = low[i].value[1] + y_dim - 1;
 		high[i].value[2] = low[i].value[2] + z_dim - 1;
-		printf("%d/%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", rank, size, patch_id, low[i].value[0], low[i].value[1], low[i].value[2], high[i].value[0], high[i].value[1], high[i].value[2]);
+		//printf("%d/%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", rank, size, patch_id, low[i].value[0], low[i].value[1], low[i].value[2], high[i].value[0], high[i].value[1], high[i].value[2]);
 	}
 
 	//All patches will have same values. Hence just create 1 patch for A and 1 for B. Pass same values again and again for every patch.
@@ -401,15 +403,15 @@ void hypre_solve(const char * exp_type, int patch_dim, int x_patches, int y_patc
 		avg_solve_time /= size;
 
 		std::cout.precision(2);
-		//exp_type			//size			num_cells   		patch_dim   		x_patches    		y_patches   		z_patches
+		//exp_type			//size			num_cells   		patch_size   		x_patches    		y_patches   		z_patches
 		//timestep			 total_time				solve_only_time			avg_comm_time				num_iterations			final_res_norm
 		if(rank==0 && omp_get_thread_num()==0)
 			std::cout <<
-			exp_type << "\t" << size << "\t" << num_cells << "\t" << patch_dim << "\t" << x_patches << "\t" << y_patches << "\t" << z_patches << "\t" << 
+			exp_type << "\t" << size << "\t" << num_cells << "\t" << input.patch_size << "\t" << input.xpatches << "\t" << input.ypatches << "\t" << input.zpatches << "\t" <<
 			timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm << 
 			"\n" ;
 
-		//verifyX(X, x_dim * y_dim * z_dim);
+		verifyX(X, x_dim * y_dim * z_dim);
 	}//for(int timestep=0; timestep<11; timestep++)
 
 
@@ -427,38 +429,40 @@ void hypre_solve(const char * exp_type, int patch_dim, int x_patches, int y_patc
 
 int main(int argc1, char **argv1)
 {
-	if(argc1 != 6){
-		printf("Enter arguments patch size and number of patches. exiting\n");
+	if(argc1 != 3){
+		printf("Enter arguments id_string and input file name. exiting\n");
 		exit(1);
 	}
 	argc = argc1;
 	argv = argv1;
 	
 	const char * exp_type = argv[1];	//cpu / gpu / gpu-mps / gpu-superpatch. Only to print in output.
-	int patch_dim = atoi(argv[2]);	//patch size
-	int x_patches = atoi(argv[3]);	//number of patches in X dimension
-	int y_patches = atoi(argv[4]);	//number of patches in Y dimension
-	int z_patches = atoi(argv[5]);	//number of patches in Z dimension
 
 //	Kokkos::initialize(argc, argv1);
 	{
 		int required=MPI_THREAD_MULTIPLE, provided;
-
 		MPI_Init_thread(&argc, &argv, required, &provided);
 		
-		int partitions = omp_get_max_threads();
 		//Kokkos::OpenMP::partition_master( hypre_solve, omp_get_num_threads(), 1);
 		
 //		Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::OpenMP>(0, partitions), [&](int i){
 //			hypre_solve(partitions, 1);
 //		});
 
-		int size;
+		int rank, size;
 		MPI_Comm_size(MPI_COMM_WORLD, &size);
+		MPI_Comm_size(MPI_COMM_WORLD, &rank);
 
-		assignPatchToProc(x_patches, y_patches, z_patches, size*partitions); //assuming EP.
+		xmlInput input = parseInput(argv[2], rank);
 
-		hypre_set_num_threads(partitions, omp_get_thread_num);
+		if(input.xthreads>0 && input.ythreads>0 && input.zthreads>0)	//override #threads
+			omp_set_num_threads(input.xthreads*input.ythreads*input.zthreads);
+
+		int threads = omp_get_max_threads();
+
+		assignPatchToProc(input, rank, size, threads); //assuming EP.
+
+		hypre_set_num_threads(threads, omp_get_thread_num);
 		//cudaProfilerStart();
 #pragma omp parallel
 		{
@@ -470,7 +474,7 @@ int main(int argc1, char **argv1)
 			printf("Device id: %d,  Device PCI Domain ID / Bus ID / location ID:   %d / %d / %d, cpu_affinity: %d\n", 
 					device_id, deviceProp.pciDomainID, deviceProp.pciBusID, deviceProp.pciDeviceID, cpu_affinity);*/
 			
-			hypre_solve(exp_type, patch_dim, x_patches, y_patches, z_patches);
+			hypre_solve(exp_type, input);
 		}
 		//cudaProfilerStop();
 		

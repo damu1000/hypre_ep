@@ -27,28 +27,29 @@ Configure line for MPI + OpenMP: ./configure --prefix=`pwd`/build CC=mpicxx CXX=
 make -j32 install
 
 ### hypre_test_v2: 
-Contains mini-apps to construct a 3d grid and Laplace equation, call Hypre to get the solution and measure the performance.
-1. hypre_cpu.cc: MPI everywhere version (uses single cpu thread per rank). Should be linked to hypre_cpu. Compile using:
 
-mpicxx hypre_cpu.cc -std=c++11 -I<...>/hypre_cpu/src/build/include/ -L<...>/hypre_cpu/src/build/lib -lHYPRE -g -O3 -fopenmp -ldl -o 1_cpu
+Contains mini-apps to construct a 3d grid and Laplace equation, call Hypre to get the solution and measure the performance.
+1. hypre_cpu.cc: MPI everywhere version (uses single cpu thread per rank). Should be linked to hypre_cpu. Requires libxml2. Compile using:
+
+mpicxx hypre_cpu.cc -std=c++11 -I<...>/hypre_cpu/src/build/include/ -L<...>/hypre_cpu/src/build/lib -lHYPRE -I<libxml2 path>/include/libxml2 -L<libxml2 path>/lib -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
 
 Run as:
 
-mpirun -np <#rank> ./1_cpu <id> <patch_size> <num_of_patches_in_x_dim> <num_of_patches_in_y_dim> <num_of_patches_in_z_dim>
+mpirun -np <#rank> ./1_cpu <id> <input_xml_name>
   
-e.g. mpirun -np 16 ./1_cpu cpu_run 32 4 2 2
+e.g. mpirun -np 16 ./1_cpu cpu_run input.xml
 
-The command spawns 16 MPI ranks. It creates a grid of total 16 patches arranged as 4x2x2 patches along x, y and z dimensions. Each patch is of size 32 cubed. "cpu_run" identifies the output - "cpu_run" can be any string. Ensure total number of patches are divisible by number of ranks. 
+The command spawns 16 MPI ranks and uses sample hypre_test_v2/input.xml. It creates a grid of total 16 patches arranged as 4x2x2 patches along x, y and z dimensions. Each patch is of size 32 cubed. "cpu_run" identifies the output - "cpu_run" can be any string. Ensure total number of patches are divisible by number of ranks. 
 
-2. hypre_cpu_ep.cc:  hypre_cpu.cc converted into hypre_cpu_ep.cc by creating extra openmp threads and a calling couple of additional functions. Link with hypre_ep. Each openmp thread is assigned with one or more patches calls hypre (contrary to hypre_cpu) for its own patches. Compile using:
+2. hypre_cpu_ep.cc:  hypre_cpu.cc converted into hypre_cpu_ep.cc by creating extra openmp threads and a calling couple of additional functions. Link with hypre_ep. Each openmp thread is assigned with one or more patches calls hypre (contrary to hypre_cpu) for its own patches. Requires libxml2. Compile using:
 
-mpicxx hypre_cpu_ep.cc -std=c++11 -I<...>/hypre_ep/src/build/include/ -I<...>/hypre_ep/src/ -L<...>/hypre_ep/src/build/lib -lHYPRE -g -O3 -o 2_ep -fopenmp
+mpicxx hypre_cpu_ep.cc -std=c++11 -I<...>/hypre_ep/src/build/include/ -I<...>/hypre_ep/src/ -L<...>/hypre_ep/src/build/lib -lHYPRE -I<libxml2 path>/include/libxml2 -L<libxml2 path>/lib -lxml2 -g -O3 -o 2_ep -fopenmp
 
-Run similar to 1_cpu, except now there will some threads instead of ranks. There could be different combinations of #threads and #ranks. Ensure that the number of patches is divisible by (#ranks*#threads) e.g. Following lines will spawn 4 mpi ranks with 4 threads per rank.:
+Run similar to 1_cpu, except now there will some threads instead of ranks. There could be different combinations of #threads and #ranks. Ensure that the number of patches is divisible by (#ranks*#threads) e.g. Following lines will spawn 4 mpi ranks with 4 threads per rank. Each thread (or EP) will get one patch:
 
 export OMP_NUM_THREADS=4
   
-mpirun -np 4 ./2_ep cpu 16 4 2 2
+mpirun -np 4 ./2_ep ep_run input.xml
 
 To compare the accuracy of ep: Uncomment calls to functions write_to_file and verifyX in files hypre_cpu.cc and hypre_cpu_ep.cc respectively. Create a folder "output" in hypre_test_v2 and run 1_cpu and 2_ep using same number of patches and same number of ranks/EndPoints. 1_cpu will write results into files and 2_ep will compare its own results with those dumped in the file.
 

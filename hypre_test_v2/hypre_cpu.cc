@@ -13,9 +13,7 @@ CPU Only
 export HYPRE_PATH=/home/damodars/hypre_ep/hypre_cpu/src/build
 export KOKKOS_PATH=/home/damodars/uintah_kokkos_dev/kokkos/kokkos_openmp/build
 
-mpicxx hypre_cpu.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -g -O3 -fopenmp -ldl -o 1_cpu
-
---expt-extended-lambda
+mpicxx hypre_cpu.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
  */
 
 #ifndef __host__
@@ -96,17 +94,6 @@ int main(int argc, char **argv)
 	//Kokkos::initialize(argc, argv);
 	{
 		//--------------------------------------------------------- init ----------------------------------------------------------------------------------------------
-		if(argc != 6){
-			printf("Enter arguments patch size and number of patches. exiting\n");
-			exit(1);
-		}
-
-		const char * exp_type = argv[1];	//cpu / gpu / gpu-mps / gpu-superpatch. Only to print in output.
-		int patch_dim = atoi(argv[2]);	//patch size
-		int x_patches = atoi(argv[3]);	//number of patches in X dimension
-		int y_patches = atoi(argv[4]);	//number of patches in Y dimension
-		int z_patches = atoi(argv[5]);	//number of patches in Z dimension
-		int number_of_patches = x_patches * y_patches * z_patches; 
 
 		MPI_Init(&argc, &argv);
 		HYPRE_Init(argc, argv);
@@ -115,12 +102,22 @@ int main(int argc, char **argv)
 		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 		MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+		if(argc != 3){
+			printf("Enter arguments id_string and input file name. exiting\n");
+			exit(1);
+		}
+
+		const char * exp_type = argv[1];	//cpu / gpu / gpu-mps / gpu-superpatch. Only to print in output.
+		xmlInput input = parseInput(argv[2], rank);
+
+		int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
+
 		if(number_of_patches % size != 0){
 			printf("Ensure total number of patches (patches cube) is divisible number of ranks. exiting\n");
 			exit(1);
 		}
 
-		int num_cells = number_of_patches*patch_dim*patch_dim*patch_dim;
+		int num_cells = number_of_patches*input.patch_size*input.patch_size*input.patch_size;
 
 		extern double _hypre_comm_time;
 		//----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -129,7 +126,7 @@ int main(int argc, char **argv)
 		//----------------------------------------------- patch set up----------------------------------------------------------------------------------------------
 
 		int patches_per_rank = number_of_patches / size;
-		int x_dim = patch_dim, y_dim = patch_dim, z_dim = patch_dim;
+		int x_dim = input.patch_size, y_dim = input.patch_size, z_dim = input.patch_size;
 
 		int patch_start = patches_per_rank*rank;	//first patch assigned to rank. next patches_per_rank will be assigned to same rank
 		std::vector<IntVector> low(patches_per_rank), high(patches_per_rank);	//store boundaries of every patch
@@ -139,12 +136,12 @@ int main(int argc, char **argv)
 			//patch id based on local patch number (i) + starting patch assigned to this rank.
 			int patch_id = patch_start + i;
 
-			// convert patch_id into 3d patch co-cordinates. Multiply by patch_dim to get starting cell of patch.
-			low[i].value[0] = x_dim * (patch_id % x_patches);
-			low[i].value[1] = y_dim * ((patch_id / x_patches) % y_patches);
-			low[i].value[2] = z_dim * ((patch_id / x_patches) / y_patches);
+			// convert patch_id into 3d patch co-cordinates. Multiply by input.patch_size to get starting cell of patch.
+			low[i].value[0] = x_dim * (patch_id % input.xpatches);
+			low[i].value[1] = y_dim * ((patch_id / input.xpatches) % input.ypatches);
+			low[i].value[2] = z_dim * ((patch_id / input.xpatches) / input.ypatches);
 
-			// add patch_dim to low to get end cell of patch. subtract 1 as hypre uses inclusive boundaries... as per Uintah code
+			// add input.patch_size to low to get end cell of patch. subtract 1 as hypre uses inclusive boundaries... as per Uintah code
 			high[i].value[0] = low[i].value[0] + x_dim - 1; //including high cell. hypre needs so.. i guess
 			high[i].value[1] = low[i].value[1] + y_dim - 1;
 			high[i].value[2] = low[i].value[2] + z_dim - 1;
@@ -337,11 +334,11 @@ int main(int argc, char **argv)
 			avg_solve_time /= size;
 			
 			std::cout.precision(2);
-				//exp_type			//size			num_cells   		patch_dim   		x_patches    		y_patches   		z_patches
+				//exp_type			//size			num_cells   		input.patch_size   		input.xpatches    		input.ypatches   		input.zpatches
 				//timestep			 total_time				solve_only_time			avg_comm_time				num_iterations			final_res_norm
 			if(rank==0)
 				std::cout <<
-				exp_type << "\t" << size << "\t" << num_cells << "\t" << patch_dim << "\t" << x_patches << "\t" << y_patches << "\t" << z_patches << "\t" << 
+				exp_type << "\t" << size << "\t" << num_cells << "\t" << input.patch_size << "\t" << input.xpatches << "\t" << input.ypatches << "\t" << input.zpatches << "\t" <<
 				timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm << 
 				"\n" ;
 
