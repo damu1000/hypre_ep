@@ -1,0 +1,28 @@
+
+<!--
+list all input parameters inside <input> tag. 
+
+Valid elemtents:
+Mandetory:
+int patch_size: patch size
+int xpatches: number of patches in x dimension
+int ypatches: number of patches in y dimension
+int zpatches: number of patches in z dimension
+
+Optional:
+string patch_assignment: scheme to assign patches. Valid values are "linear" or "cubical". xthreads, ythreads, zthreads arguments are required for cubical scheme. Default value: linear
+int xthreads: number of threads in x dimension (threads will be arranged in 3d grid)
+int ythreads: number of threads in y dimension (threads will be arranged in 3d grid)
+int zthreads: number of threads in z dimension (threads will be arranged in 3d grid)
+xthreads * ythreads * zthreads will override OMP_NUM_THREADS
+
+-->
+
+<input>
+
+<patch_size>16</patch_size>
+<xpatches>4</xpatches>
+<ypatches>2</ypatches>
+<zpatches>2</zpatches>
+
+</input>
