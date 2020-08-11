@@ -64,7 +64,7 @@ void inline verifyX(ViewDouble A, size_t size){
 #pragma omp parallel for
 		for(int i=0; i<size; i++){
 			if(fabs(AM[i] - correct[i]) > 1e-9 ){
-				printf("Error at node %d -> correct: %f \t computed:%f \t diff: %f\n", i, correct[i], AM[i], fabs(AM[i] - correct[i]));
+				printf("Error at node %d -> correct: %f \t computed:%f \t diff: %f in file %s\n", i, correct[i], AM[i], fabs(AM[i] - correct[i]), filename.c_str());
 				exit(1);
 			}
 		}
@@ -98,8 +98,6 @@ xmlInput parseInput(const char * file, int rank){
 	   printf("error: could not parse input file %s\n", file);
 	   exit(1);
    }
-
-   if(rank == 0) printf("Running with inputs:");
 
    xmlNode *root_element = xmlDocGetRootElement(doc);
 
@@ -146,6 +144,15 @@ xmlInput parseInput(const char * file, int rank){
 	  }
    }
 
+   if(rank == 0){
+	   printf("Running with inputs:\n");
+	   printf("patch size: %d\n", input.patch_size);
+	   printf("number of patches : %d, %d, %d\n", input.xpatches, input.ypatches, input.zpatches);
+	   printf("patch assignment scheme: %s\n", input.patch_assignment_scheme.c_str());
+
+
+
+   }
 
    xmlFreeDoc(doc);
    xmlCleanupParser();

@@ -63,7 +63,6 @@ double tolerance = 1.e-25;
 char **argv;
 int argc;
 
-
 typedef struct IntVector
 {
 	int value[3]; //x: 0, y:1, z:2. Loop order z, y, x. x changes fastest.
@@ -95,9 +94,9 @@ int get_affinity() {
 std::vector<int> g_patch_proc;
 
 //as of now using simple logic of serial assignment
-void assignPatchToProc(xmlInput input, int rank, int size, int num_of_threads){
+void assignPatchToProc(xmlInput input, int size, int num_of_threads){
 	int num_of_ranks = size * num_of_threads; // this number of end points
-	int patch=0;
+	int patch=0, rank=0;
 	int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
 	int patches_per_rank = number_of_patches / num_of_ranks;
 
@@ -411,7 +410,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 			timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm << 
 			"\n" ;
 
-		verifyX(X, x_dim * y_dim * z_dim);
+		//verifyX(X, x_dim * y_dim * z_dim);
 	}//for(int timestep=0; timestep<11; timestep++)
 
 
@@ -450,17 +449,21 @@ int main(int argc1, char **argv1)
 //		});
 
 		int rank, size;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 		MPI_Comm_size(MPI_COMM_WORLD, &size);
-		MPI_Comm_size(MPI_COMM_WORLD, &rank);
 
 		xmlInput input = parseInput(argv[2], rank);
 
-		if(input.xthreads>0 && input.ythreads>0 && input.zthreads>0)	//override #threads
+		if(input.xthreads>0 && input.ythreads>0 && input.zthreads>0){	//override #threads
 			omp_set_num_threads(input.xthreads*input.ythreads*input.zthreads);
+ 		    if(rank ==0) printf("number of threads %d, %d, %d\n", input.xthreads, input.ythreads, input.zthreads);
+		}
 
 		int threads = omp_get_max_threads();
 
-		assignPatchToProc(input, rank, size, threads); //assuming EP.
+		if(rank ==0) printf("Number of threads %d\n", threads);
+
+		assignPatchToProc(input, size, threads); //assuming EP.
 
 		hypre_set_num_threads(threads, omp_get_thread_num);
 		//cudaProfilerStart();

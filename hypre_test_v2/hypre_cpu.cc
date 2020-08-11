@@ -342,7 +342,10 @@ int main(int argc, char **argv)
 				timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm << 
 				"\n" ;
 
-			write_to_file(X, x_dim * y_dim * z_dim);
+			//dont enable both at the same time :)
+			//write_to_file(X, x_dim * y_dim * z_dim);
+			//verifyX(X, x_dim * y_dim * z_dim);
+
 		}//for(int timestep=0; timestep<11; timestep++)
 
 
