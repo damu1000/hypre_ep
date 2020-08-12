@@ -89,47 +89,87 @@ int get_affinity() {
 	return core;
 }
 
-//patches numbers are always assigned serially. Proc assignment logic may vary.
-//index into g_patch_proc indicates patch id, values indicates assigned proc.
-std::vector<int> g_patch_proc;
+//patches numbers are always assigned serially. EP assignment logic may vary.
+//index into g_patch_ep indicates patch id, values indicates assigned EP.
+std::vector<int> g_patch_ep;
+std::vector<int> g_ep_superpatch; //ep to superpatch mapping
+int g_superpatches[3];
 
 //as of now using simple logic of serial assignment
-void assignPatchToProc(xmlInput input, int size, int num_of_threads){
-	int num_of_ranks = size * num_of_threads; // this number of end points
-	int patch=0, rank=0;
+void assignPatchToEP(xmlInput input, int size, int num_of_threads){
+	int num_of_eps = size * num_of_threads; // this number of end points
+	int patch=0, ep=0;
 	int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
-	int patches_per_rank = number_of_patches / num_of_ranks;
+	int patches_per_ep = number_of_patches / num_of_eps;
 
-	g_patch_proc.resize(input.xpatches * input.ypatches * input.zpatches);
+	g_patch_ep.resize(input.xpatches * input.ypatches * input.zpatches);
 
 	for(int i=0; i<input.zpatches; i++)
 	for(int j=0; j<input.ypatches; j++)
 	for(int k=0; k<input.xpatches; k++){
-		g_patch_proc[patch++] = rank;
-		if(patch % patches_per_rank == 0) rank++;
+		g_patch_ep[patch++] = ep;
+		if(patch % patches_per_ep == 0) ep++;
 	}
+
+
+	//loop over dimensions and find out number of "superpatches" used to find out comm directions
+	//Each superpatch is a combined patch of all patches assigned to an EP. Thus mimics one patch per EP assignment.
+	//CAUTION: can be changed with the new logic of dividing threads in three dimensions.
+
+	g_superpatches[0] = input.xpatches, g_superpatches[1] = input.ypatches, g_superpatches[2] = input.zpatches;
+
+	for(int i=0; i<3; i++){
+		if(g_superpatches[i] >= patches_per_ep){ //patches fit within the given dimension. recompute and break
+			if(g_superpatches[i] % patches_per_ep != 0){ //patch dim should be multiple of patches_per_ep
+				printf("Part 1: number of patches per EP should be aligned with patch dimensions at %s:%d\n", __FILE__, __LINE__);exit(1);
+			}
+			g_superpatches[i] = g_superpatches[i] / patches_per_ep;
+			patches_per_ep = 1;
+			break;
+		}
+		else{//there can be multiple rows or planes assigned to one EP
+			if(patches_per_ep % g_superpatches[i] != 0){ //now patches_per_ep should be multiple of patch_dim
+				printf("Part 2: number of patches per EP should be aligned with patch dimensions at %s:%d\n", __FILE__, __LINE__);exit(1);
+			}
+			patches_per_ep = patches_per_ep / g_superpatches[i];
+			g_superpatches[i] = 1; //current dimension will be 1 because no division across this dimension
+		}
+	}
+
+	if(patches_per_ep !=1 || num_of_eps != g_superpatches[0]*g_superpatches[1]*g_superpatches[2]){
+		printf("Part 3: Error in superpatch generation logic at %s:%d\n", __FILE__, __LINE__);exit(1);
+	}
+
+	//iterate over eps and map eps to superpatces.
+	g_ep_superpatch.resize(num_of_eps);
+	for(int i=0; i<num_of_eps; i++){//num_of_eps = num_superpatches
+		int base_patch = i * patches_per_ep;
+		int ep = g_patch_ep[base_patch];
+		g_ep_superpatch[ep] = i; //this gives mapping of rank to super-patch
+
+	}
+
 
 	/*MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	if(rank==0)
-		for(int i=0; i<g_patch_proc.size(); i++)
-			printf("patch assignment: %d %d\n", i, g_patch_proc[i]);*/
+		for(int i=0; i<g_patch_ep.size(); i++)
+			printf("patch assignment: %d %d\n", i, g_patch_ep[i]);*/
 }
 
-//Quick  and really really dirty. Try improving later. should be called after assignPatchToProc.
+//Quick  and really really dirty. Try improving later. should be called after assignPatchToEP.
 void getMyPatches( std::vector<int>& my_patches, int my_rank)
 {
-	for(int i=0; i<g_patch_proc.size(); i++){
-		if(g_patch_proc[i] == my_rank)	my_patches.push_back(i);
+	for(int i=0; i<g_patch_ep.size(); i++){
+		if(g_patch_ep[i] == my_rank)	my_patches.push_back(i);
 	}
 }
 
-void findNeighbors(std::vector<RankDir> & neighbors, std::vector<int>& my_patches, int x_patches, int y_patches, int z_patches, int rank){
 /*
 1. Loop over my patches. For every patch:
 2. Loop over (-1, -1, -1) to (1, 1, 1). Calculate offset for every direction (i, j, k) and add it to the current patch to get neighboring patch
 3. Find proc of neighbor patch. Add it if its not same as self.
 */
-	int tot_num_patches = g_patch_proc.size();
+/*void findNeighbors(std::vector<RankDir> & neighbors, std::vector<int>& my_patches, int x_patches, int y_patches, int z_patches, int rank){
 
 	for(int p : my_patches){	
 		int iid = p / (y_patches*x_patches);
@@ -141,7 +181,7 @@ void findNeighbors(std::vector<RankDir> & neighbors, std::vector<int>& my_patche
 		for(int k=kid-1; k<kid+2; k++){
 			if(i > -1 && i < z_patches && j > -1 && j < y_patches && k > -1 && k < x_patches){
 				int neighbor = i * y_patches * x_patches + j * x_patches + k;
-				int proc = g_patch_proc[neighbor];
+				int proc = g_patch_ep[neighbor];
 				if(proc != rank){
 					//printf("pushing neighbours %d %d %d %d %d\n",k-kid, j-jid, i-iid, rank, proc);
 					neighbors.push_back(RankDir(k-kid, j-jid, i-iid, rank, proc)); //for send
@@ -151,10 +191,7 @@ void findNeighbors(std::vector<RankDir> & neighbors, std::vector<int>& my_patche
 			}
 		}		
 	}
-
-
-	
-}
+}*/
 
 void hypre_solve(const char * exp_type, xmlInput input)
 {
@@ -171,7 +208,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	hypre_MPI_Comm_size(MPI_COMM_WORLD, &size);
 
 	if(number_of_patches % size != 0){
-		printf("Ensure total number of patches (patches cube) is divisible number of ranks. exiting\n");
+		printf("Ensure total number of patches (patches cube) is divisible number of ranks at %s:%d. exiting\n", __FILE__, __LINE__);
 		exit(1);
 	}
 
@@ -186,10 +223,10 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	std::vector<int> my_patches;
 	getMyPatches( my_patches, rank );
 
-	std::vector<RankDir> neighbors;
-	findNeighbors(neighbors, my_patches, input.xpatches, input.ypatches, input.zpatches, rank); //assuming EP.
+	//std::vector<RankDir> neighbors;
+	//findNeighbors(neighbors, my_patches, input.xpatches, input.ypatches, input.zpatches, rank); //assuming EP.
 
-	createCommMap(neighbors.data(), neighbors.size());	//in hypre_mpi_ep_helper.h
+	createCommMap(g_ep_superpatch.data(), g_superpatches, input.xthreads, input.ythreads, input.zthreads);	//in hypre_mpi_ep_helper.h
 
 	int patches_per_rank = my_patches.size();
 	int x_dim = input.patch_size, y_dim = input.patch_size, z_dim = input.patch_size;
@@ -378,7 +415,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 
 		if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
 		{
-			std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << "\n";
+			std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << " at " <<  __FILE__  << ":" << __LINE__ << "\n";
 			exit(1);
 		}
 
@@ -429,7 +466,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 int main(int argc1, char **argv1)
 {
 	if(argc1 != 3){
-		printf("Enter arguments id_string and input file name. exiting\n");
+		printf("Enter arguments id_string and input file name at %s:%d. exiting\n", __FILE__, __LINE__);
 		exit(1);
 	}
 	argc = argc1;
@@ -463,7 +500,7 @@ int main(int argc1, char **argv1)
 
 		if(rank ==0) printf("Number of threads %d\n", threads);
 
-		assignPatchToProc(input, size, threads); //assuming EP.
+		assignPatchToEP(input, size, threads); //assuming EP.
 
 		hypre_set_num_threads(threads, omp_get_thread_num);
 		//cudaProfilerStart();

@@ -169,7 +169,7 @@ Multiple comms for EP
 #include <unordered_map>
 #include <vector>
 #include <functional>
-#define COMMS_PER_THREAD 27
+#define COMMS_PER_THREAD 28
 
 MPI_Comm * g_comm_pool;
 
@@ -194,16 +194,26 @@ namespace std {	//needed for hash of SrcDestKey used by unordered_map
 }
 
 std::vector<std::unordered_map<SrcDestKey, MPI_Comm>> g_comm_map;
+int *g_ep_superpatch_map;
+int g_x_superpatches, g_y_superpatches, g_z_superpatches;
+//int g_xthreads, g_ythreads, g_zthreads;
+int g_x_sspatches, g_y_sspatches, g_z_sspatches; //sspatches -> super super patches: super super patch is huge patch of all the patches from all the threads of real dest rank
 
+//convert super patch ids from 1d to 3d
+#define OneDtoThreeD(t, p, x_patches, y_patches, z_patches)	\
+	t[2] = p / (y_patches*x_patches);						\
+	t[1] = (p % (y_patches*x_patches)) / x_patches;			\
+	t[0] = p % x_patches;
 
-void createCommMap(RankDir *m, int size)
+void createCommMap(int *ep_superpatch, int *super_dims, int xthreads, int ythreads, int zthreads)
 {
-	for(int i=0; i<size; i++){
-		int comm_id = abs(m[i].d0) + abs(m[i].d1) * 3 + abs(m[i].d2) * 9;			
-		//printf("createCommMap %d: %d %d\n", g_rank, m[i].src, m[i].dest);
-		int dest_thread = m[i].dest % g_num_of_threads;
-		g_comm_map[g_thread_id][SrcDestKey(m[i].src, m[i].dest)] = g_comm_pool[dest_thread*COMMS_PER_THREAD + comm_id];
-	}
+	g_ep_superpatch_map = ep_superpatch;
+	g_x_superpatches = super_dims[0];
+	g_y_superpatches = super_dims[1];
+	g_z_superpatches = super_dims[2];
+	//g_xthreads = xthreads, g_ythreads = ythreads, g_zthreads = zthreads;
+	g_x_sspatches =  g_x_superpatches / xthreads,  g_y_sspatches =  g_y_superpatches / ythreads,  g_z_sspatches =  g_z_superpatches / zthreads;
+
 }
 
 #endif //#ifdef USE_MULTIPLE_COMMS
@@ -216,13 +226,40 @@ inline MPI_Comm getComm(int src, int dest)
 
 #ifdef USE_MULTIPLE_COMMS
 	int dest_thread = dest % g_num_of_threads;
-	auto it = g_comm_map[g_thread_id].find(SrcDestKey(src, dest));
+	SrcDestKey key(src, dest);
+	auto it = g_comm_map[g_thread_id].find(key);
 	if(it != g_comm_map[g_thread_id].end())
 		comm = it->second;
 	else{
-		//printf("%d comm not found for src: %d dest: %d\n", g_rank, src, dest);
+		//find superpatches corresponding to src and dest
+		int src_patch = g_ep_superpatch_map[src], dest_patch = g_ep_superpatch_map[dest];
+		int src3d[3], dest3d[3], dir[3], real_rank[3];
+
+		//convert super patch ids from 1d to 3d
+		OneDtoThreeD(src3d,  src_patch,  g_x_superpatches, g_y_superpatches, g_z_superpatches);
+		OneDtoThreeD(dest3d, dest_patch, g_x_superpatches, g_y_superpatches, g_z_superpatches);
+
+		//find comm direction = dest - src and compute comm_id
+		for(int i=0; i<3; i++){
+			dir[i] = dest3d[i]-src3d[i];
+			if(dir[i] != 0) dir[i] = dir[i] / abs(dir[i]); //divide by abs value to make dir value 1 or -1
+		}
+
+		int comm_id = abs(dir[0]) + abs(dir[1]) * 3 + abs(dir[2]) * 9;
+
+		//figure out even / odd and subtract 13 to offset for odd destinations
+		//int dest_real_rank = dest / g_num_of_threads;
+		//OneDtoThreeD(real_rank, dest_real_rank, g_x_sspatches, g_y_sspatches, g_z_sspatches);
+
+		//if(real_rank[0]%2 == 1 || real_rank[1]%2 == 1 || real_rank[2]%2 == 1)
+		//	comm_id = comm_id + 14; //subtract 13 to offset for odd destinations
+
+
+		//pick comm from dest thread's queue with offset given by comm_id
 		int dest_thread = dest % g_num_of_threads;
-		comm =  g_comm_pool[dest_thread*COMMS_PER_THREAD];
+		comm =  g_comm_pool[dest_thread*COMMS_PER_THREAD + comm_id];
+		printf("%d added comm for src %d dest %d comm_id %d\n", g_rank, src, dest, comm_id);
+		g_comm_map[g_thread_id][key] = comm;
 	}
 #endif //#ifdef USE_MULTIPLE_COMMS
 

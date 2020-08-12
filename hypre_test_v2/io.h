@@ -82,9 +82,9 @@ struct xmlInput{
 	int ypatches{-1};	// number of patches in y dimension
 	int zpatches{-1};	// number of patches in z dimension
 	std::string patch_assignment_scheme{"linear"}; 	//scheme to assign patches. Valid values are "linear" or "cubical". xthreads, ythreads, zthreads arguments are required for cubical scheme. Default value: linear
-	int xthreads{-1}; // number of threads in x dimension (threads will be arranged in 3d grid)
-	int ythreads{-1}; // number of threads in y dimension (threads will be arranged in 3d grid)
-	int zthreads{-1}; // number of threads in z dimension (threads will be arranged in 3d grid)
+	int xthreads{1}; // number of threads in x dimension (threads will be arranged in 3d grid)
+	int ythreads{1}; // number of threads in y dimension (threads will be arranged in 3d grid)
+	int zthreads{1}; // number of threads in z dimension (threads will be arranged in 3d grid)
 
 };
 
@@ -124,7 +124,7 @@ xmlInput parseInput(const char * file, int rank){
     		   input.zthreads = atoi(val.c_str());
     	   }
     	   else{
-    		   printf("input element %s is not supported\n", cur->name);
+    		   printf("input element %s is not supported at %s:%d\n", cur->name, __FILE__, __LINE__);
     		   exit(1);
     	   }
        }
@@ -132,15 +132,18 @@ xmlInput parseInput(const char * file, int rank){
 
    //bulletproofing
    if(input.patch_size==-1 || input.xpatches==-1 || input.ypatches==-1 || input.zpatches==-1){
-	   printf("Please enter patch_size, xpatches, ypatches and zpatches in the input file\n"); exit(1);
+	   printf("Please enter patch_size, xpatches, ypatches and zpatches in the input file at %s:%d\n", __FILE__, __LINE__); exit(1);
    }
 
-   if(input.patch_assignment_scheme=="cubical"){
-	  if(input.xthreads==-1 || input.ythreads==-1 || input.zthreads==-1){
-	   printf("Please enter patch_size, xthreads, ythreads and zthreads in the input file for cubical patch_assignment_scheme\n"); exit(1);
-	  }
+   if(input.patch_assignment_scheme=="linear"){
+	   input.xthreads = omp_get_max_threads();
+   }
+   else if(input.patch_assignment_scheme=="cubical"){
+//	  if(input.xthreads==-1 || input.ythreads==-1 || input.zthreads==-1){
+//	   printf("Please enter patch_size, xthreads, ythreads and zthreads in the input file for cubical patch_assignment_scheme at %s:%d\n", __FILE__, __LINE__); exit(1);
+//	  }
 	  if(input.xpatches % input.xthreads != 0 || input.ypatches % input.ythreads != 0 || input.zpatches % input.zthreads != 0){
-		 printf("The number of patches in a dimension should be divisible by the number of threads in that dimension\n"); exit(1);
+		 printf("The number of patches in a dimension should be divisible by the number of threads in that dimension at %s:%d\n", __FILE__, __LINE__); exit(1);
 	  }
    }
 
@@ -149,9 +152,6 @@ xmlInput parseInput(const char * file, int rank){
 	   printf("patch size: %d\n", input.patch_size);
 	   printf("number of patches : %d, %d, %d\n", input.xpatches, input.ypatches, input.zpatches);
 	   printf("patch assignment scheme: %s\n", input.patch_assignment_scheme.c_str());
-
-
-
    }
 
    xmlFreeDoc(doc);
