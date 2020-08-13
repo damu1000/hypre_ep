@@ -16,11 +16,6 @@ export KOKKOS_PATH=/home/damodars/uintah_kokkos_dev/kokkos/kokkos_openmp/build
 mpicxx hypre_cpu.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
  */
 
-#ifndef __host__
-#define __host__
-#define __device__
-#endif
-
 #include<chrono>
 #include <ctime>
 #include<cmath>
@@ -148,14 +143,13 @@ int main(int argc, char **argv)
 			//printf("%d/%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", rank, size, patch_id, low[i].value[0], low[i].value[1], low[i].value[2], high[i].value[0], high[i].value[1], high[i].value[2]);
 		}
 
-		//All patches will have same values. Hence just create 1 patch for A and 1 for B. Pass same values again and again for every patch.
 		//ViewDouble X("X", x_dim * y_dim * z_dim), B("B", x_dim * y_dim * z_dim);
 		//ViewStencil4 A("A", x_dim * y_dim * z_dim);
-		Stencil4 A[x_dim * y_dim * z_dim];
-		double X[x_dim * y_dim * z_dim], B[x_dim * y_dim * z_dim];
+		Stencil4 A[x_dim * y_dim * z_dim * patches_per_rank];
+		double X[x_dim * y_dim * z_dim * patches_per_rank], B[x_dim * y_dim * z_dim * patches_per_rank];
 
 		//Kokkos::parallel_for(Kokkos::RangePolicy<KernelSpace>(0, x_dim * y_dim * z_dim), KOKKOS_LAMBDA(int i){
-		for(int i=0; i<x_dim * y_dim * z_dim; i++){
+		for(int i=0; i<x_dim * y_dim * z_dim * patches_per_rank; i++){
 			A[i].p = 6; A[i].n=-1; A[i].e=-1; A[i].t=-1;
 			B[i] = 1;
 			X[i] = 0;
@@ -186,7 +180,7 @@ int main(int argc, char **argv)
 		bool HA_created = false;
 		bool HX_created = false;
 
-		for(int timestep=0; timestep<5; timestep++)
+		for(int timestep=0; timestep<11; timestep++)
 		{
 			_hypre_comm_time = 0.0;
 			auto start = std::chrono::system_clock::now();
@@ -227,7 +221,7 @@ int main(int argc, char **argv)
 				int stencil_indices[] = {0,1,2,3};
 
 				for(int i=0; i<patches_per_rank; i++){
-					double *values = reinterpret_cast<double *>(A);
+					double *values = reinterpret_cast<double *>(&A[i * x_dim * y_dim * z_dim]);
 					HYPRE_StructMatrixSetBoxValues(*HA, low[i].value, high[i].value,
 							4, stencil_indices,
 							values);
@@ -239,7 +233,7 @@ int main(int argc, char **argv)
 			//set up RHS
 
 			for(int i=0; i<patches_per_rank; i++)
-				HYPRE_StructVectorSetBoxValues(*HB, low[i].value, high[i].value, B);
+				HYPRE_StructVectorSetBoxValues(*HB, low[i].value, high[i].value, &B[i * x_dim * y_dim * z_dim]);
 
 			if(do_setup)
 				HYPRE_StructVectorAssemble(*HB);
@@ -315,7 +309,7 @@ int main(int argc, char **argv)
 			}
 
 			for(int i=0; i<patches_per_rank; i++)
-				HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, X);
+				HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, &X[i * x_dim * y_dim * z_dim]);
 			
 			auto end = std::chrono::system_clock::now();
 			std::chrono::duration<double> comp_time = end - start;
@@ -343,8 +337,8 @@ int main(int argc, char **argv)
 				"\n" ;
 
 			//dont enable both at the same time :)
-			//write_to_file(X, x_dim * y_dim * z_dim);
-			//verifyX(X, x_dim * y_dim * z_dim);
+			if(input.verify)
+				write_to_file(X, x_dim * y_dim * z_dim, patches_per_rank);
 
 		}//for(int timestep=0; timestep<11; timestep++)
 

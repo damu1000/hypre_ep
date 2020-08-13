@@ -197,7 +197,7 @@ std::vector<std::unordered_map<SrcDestKey, MPI_Comm>> g_comm_map;
 int *g_ep_superpatch_map;
 int g_x_superpatches, g_y_superpatches, g_z_superpatches;
 //int g_xthreads, g_ythreads, g_zthreads;
-int g_x_sspatches, g_y_sspatches, g_z_sspatches; //sspatches -> super super patches: super super patch is huge patch of all the patches from all the threads of real dest rank
+int g_x_ranks, g_y_ranks, g_z_ranks; //sspatches -> super super patches: super super patch is huge patch of all the patches from all the threads of real dest rank
 
 //convert super patch ids from 1d to 3d
 #define OneDtoThreeD(t, p, x_patches, y_patches, z_patches)	\
@@ -205,14 +205,12 @@ int g_x_sspatches, g_y_sspatches, g_z_sspatches; //sspatches -> super super patc
 	t[1] = (p % (y_patches*x_patches)) / x_patches;			\
 	t[0] = p % x_patches;
 
-void createCommMap(int *ep_superpatch, int *super_dims, int xthreads, int ythreads, int zthreads)
+void createCommMap(int *ep_superpatch, int *super_dims, int *rank_dims, int xthreads, int ythreads, int zthreads)
 {
 	g_ep_superpatch_map = ep_superpatch;
-	g_x_superpatches = super_dims[0];
-	g_y_superpatches = super_dims[1];
-	g_z_superpatches = super_dims[2];
+	g_x_superpatches = super_dims[0], g_y_superpatches = super_dims[1], g_z_superpatches = super_dims[2];
 	//g_xthreads = xthreads, g_ythreads = ythreads, g_zthreads = zthreads;
-	g_x_sspatches =  g_x_superpatches / xthreads,  g_y_sspatches =  g_y_superpatches / ythreads,  g_z_sspatches =  g_z_superpatches / zthreads;
+	g_x_ranks = rank_dims[0],  g_y_ranks = rank_dims[1],  g_z_ranks = rank_dims[2];
 
 }
 
@@ -248,11 +246,11 @@ inline MPI_Comm getComm(int src, int dest)
 		int comm_id = abs(dir[0]) + abs(dir[1]) * 3 + abs(dir[2]) * 9;
 
 		//figure out even / odd and subtract 13 to offset for odd destinations
-		//int dest_real_rank = dest / g_num_of_threads;
-		//OneDtoThreeD(real_rank, dest_real_rank, g_x_sspatches, g_y_sspatches, g_z_sspatches);
+		int dest_real_rank = dest / g_num_of_threads;
+		OneDtoThreeD(real_rank, dest_real_rank, g_x_ranks, g_y_ranks, g_z_ranks);
 
-		//if(real_rank[0]%2 == 1 || real_rank[1]%2 == 1 || real_rank[2]%2 == 1)
-		//	comm_id = comm_id + 14; //subtract 13 to offset for odd destinations
+		if(real_rank[0]%2 == 1 || real_rank[1]%2 == 1 || real_rank[2]%2 == 1)
+			comm_id = comm_id + 14; //subtract 13 to offset for odd destinations
 
 
 		//pick comm from dest thread's queue with offset given by comm_id

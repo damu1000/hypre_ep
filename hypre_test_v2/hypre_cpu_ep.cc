@@ -94,66 +94,119 @@ int get_affinity() {
 std::vector<int> g_patch_ep;
 std::vector<int> g_ep_superpatch; //ep to superpatch mapping
 int g_superpatches[3];
+int g_num_of_ranks3d[3];
+
+#define OneDtoThreeD(t, p, x_patches, y_patches, z_patches)	\
+	t[2] = p / (y_patches*x_patches);						\
+	t[1] = (p % (y_patches*x_patches)) / x_patches;			\
+	t[0] = p % x_patches;
 
 //as of now using simple logic of serial assignment
-void assignPatchToEP(xmlInput input, int size, int num_of_threads){
+void assignPatchToEP(xmlInput input, int rank, int size, int num_of_threads){
+
 	int num_of_eps = size * num_of_threads; // this number of end points
-	int patch=0, ep=0;
-	int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
-	int patches_per_ep = number_of_patches / num_of_eps;
+	int num_of_patches = input.xpatches * input.ypatches * input.zpatches;
+	int patches_per_ep = num_of_patches / num_of_eps;
+	int num_of_psets = num_of_patches / num_of_threads; //number of patch sets
+	int num_of_psets_per_rank = num_of_psets / size;
+	int xpsets = input.xpatches / input.xthreads,  ypsets = input.ypatches / input.ythreads,  zpsets = input.zpatches / input.zthreads;
 
-	g_patch_ep.resize(input.xpatches * input.ypatches * input.zpatches);
-
-	for(int i=0; i<input.zpatches; i++)
-	for(int j=0; j<input.ypatches; j++)
-	for(int k=0; k<input.xpatches; k++){
-		g_patch_ep[patch++] = ep;
-		if(patch % patches_per_ep == 0) ep++;
+	if(num_of_eps > num_of_patches){
+		printf("Ensure that num of end points <= num of patches\n"); exit(1);
 	}
 
-
-	//loop over dimensions and find out number of "superpatches" used to find out comm directions
-	//Each superpatch is a combined patch of all patches assigned to an EP. Thus mimics one patch per EP assignment.
-	//CAUTION: can be changed with the new logic of dividing threads in three dimensions.
-
-	g_superpatches[0] = input.xpatches, g_superpatches[1] = input.ypatches, g_superpatches[2] = input.zpatches;
+	//bulletproofing: Ensure num_of_psets_per_rank is aligned with xpsets, ypsets and zpsets
+	g_num_of_ranks3d[0] = xpsets, g_num_of_ranks3d[1] = ypsets, g_num_of_ranks3d[2] = zpsets;
+	int temp = num_of_psets_per_rank;
 
 	for(int i=0; i<3; i++){
-		if(g_superpatches[i] >= patches_per_ep){ //patches fit within the given dimension. recompute and break
-			if(g_superpatches[i] % patches_per_ep != 0){ //patch dim should be multiple of patches_per_ep
-				printf("Part 1: number of patches per EP should be aligned with patch dimensions at %s:%d\n", __FILE__, __LINE__);exit(1);
+		if(g_num_of_ranks3d[i] >= temp){ //patches fit within the given dimension. recompute and break
+			if(g_num_of_ranks3d[i] % temp != 0){ //patch dim should be multiple of patches_per_ep
+				printf("Part 1: number of psets per rank should be aligned with patch dimensions at %s:%d\n", __FILE__, __LINE__);exit(1);
 			}
-			g_superpatches[i] = g_superpatches[i] / patches_per_ep;
-			patches_per_ep = 1;
+			g_num_of_ranks3d[i] = g_num_of_ranks3d[i] / temp;
+			temp = 1;
 			break;
 		}
 		else{//there can be multiple rows or planes assigned to one EP
-			if(patches_per_ep % g_superpatches[i] != 0){ //now patches_per_ep should be multiple of patch_dim
+			if(temp % g_num_of_ranks3d[i] != 0){ //now patches_per_ep should be multiple of patch_dim
+				printf("Part 2: number of psets per rank should be aligned with patch dimensions at %s:%d\n", __FILE__, __LINE__);exit(1);
+			}
+			temp = temp / g_num_of_ranks3d[i];
+			g_num_of_ranks3d[i] = 1; //current dimension will be 1 because no division across this dimension
+		}
+	}
+
+	if(temp !=1 || size != g_num_of_ranks3d[0]*g_num_of_ranks3d[1]*g_num_of_ranks3d[2]){
+		printf("Part 3: Error in superpatch generation logic at %s:%d\n", __FILE__, __LINE__);exit(1);
+	}
+
+	g_patch_ep.resize(input.xpatches * input.ypatches * input.zpatches);
+	g_ep_superpatch.resize(num_of_eps);
+
+	//Each rank will hold patchsets from rank*num_of_psets_per_rank to rank*num_of_psets_per_rank + num_of_psets_per_rank - 1
+	//bulletproofing ensures patchset assignment among ranks is aligned and continuous. So ranks can be converted directly to 3D coordinates for odd-even logic
+	//patch assignment
+	for(int rank=0; rank<size; rank++){
+		//convert low and high patchset ids to 3d and multiply by xthreads, ythreads, zthreads to find out first and the last patch ids of the rank
+		int plow[3], phigh[3], pslownum = rank*num_of_psets_per_rank, pshighnum = rank*num_of_psets_per_rank + num_of_psets_per_rank-1;
+		OneDtoThreeD(plow, pslownum, xpsets, ypsets, zpsets);	//plow has 3d patch set id of the first patch of the rank;
+		OneDtoThreeD(phigh, pshighnum, xpsets, ypsets, zpsets);	//phigh has 3d patch set id of the last patch of the rank;
+		//Now multiply by xthreads, ythreads, zthreads to find out first and the last patch ids of the rank
+		plow[0] *= input.xthreads; plow[1] *= input.ythreads; plow[2] *= input.zthreads;
+		phigh[0] *= input.xthreads; phigh[1] *= input.ythreads; phigh[2] *= input.zthreads;
+		phigh[0] += input.xthreads; phigh[1] += input.ythreads; phigh[2] += input.zthreads; //Add xthreads, ythreads, zthreads to take high to the last patch within the pset
+		int tid = 0, count=0;
+		//now iterate over patches and assign EPs.
+		for(int k=plow[2]; k<phigh[2]; k++)
+		for(int j=plow[1]; j<phigh[1]; j++)
+		for(int i=plow[0]; i<phigh[0]; i++){
+			int patch = k * input.xpatches * input.ypatches + j * input.xpatches + i;
+			int ep = rank * num_of_threads + tid;
+			g_patch_ep[patch] = ep;
+			g_ep_superpatch[ep] = patch / patches_per_ep;
+			count++;
+			if(count % patches_per_ep == 0) tid++;
+			//calculate super patches within ep to find out directions
+		}
+	}
+
+//	if(rank==0){
+//		printf("ranks shape: %d %d %d\n", g_num_of_ranks3d[0], g_num_of_ranks3d[1], g_num_of_ranks3d[2]);
+//		for(int i=0; i<g_patch_ep.size(); i++)
+//			printf("patch %d EP %d\n", i, g_patch_ep[i]);
+//
+//		for(int i=0; i<g_ep_superpatch.size(); i++)
+//			printf("EP %d superpatch %d\n", i, g_ep_superpatch[i]);
+//	}
+
+
+	//compute number of number of superpatches in each dimension. Needed to convert super patch number to 3d during comm mapping.
+	//same logic as used earlier to compute number of ranks in each direction
+	g_superpatches[0] = input.xpatches, g_superpatches[1] = input.ypatches, g_superpatches[2] = input.zpatches;
+
+	int spatches_per_ep = patches_per_ep;
+	for(int i=0; i<3; i++){
+		if(g_superpatches[i] >= spatches_per_ep){ //patches fit within the given dimension. recompute and break
+			if(g_superpatches[i] % spatches_per_ep != 0){ //patch dim should be multiple of patches_per_ep
+				printf("Part 1: number of patches per EP should be aligned with patch dimensions at %s:%d\n", __FILE__, __LINE__);exit(1);
+			}
+			g_superpatches[i] = g_superpatches[i] / spatches_per_ep;
+			spatches_per_ep = 1;
+			break;
+		}
+		else{//there can be multiple rows or planes assigned to one EP
+			if(spatches_per_ep % g_superpatches[i] != 0){ //now patches_per_ep should be multiple of patch_dim
 				printf("Part 2: number of patches per EP should be aligned with patch dimensions at %s:%d\n", __FILE__, __LINE__);exit(1);
 			}
-			patches_per_ep = patches_per_ep / g_superpatches[i];
+			spatches_per_ep = spatches_per_ep / g_superpatches[i];
 			g_superpatches[i] = 1; //current dimension will be 1 because no division across this dimension
 		}
 	}
 
-	if(patches_per_ep !=1 || num_of_eps != g_superpatches[0]*g_superpatches[1]*g_superpatches[2]){
+	if(spatches_per_ep !=1 || num_of_eps != g_superpatches[0]*g_superpatches[1]*g_superpatches[2]){
 		printf("Part 3: Error in superpatch generation logic at %s:%d\n", __FILE__, __LINE__);exit(1);
 	}
-
-	//iterate over eps and map eps to superpatces.
-	g_ep_superpatch.resize(num_of_eps);
-	for(int i=0; i<num_of_eps; i++){//num_of_eps = num_superpatches
-		int base_patch = i * patches_per_ep;
-		int ep = g_patch_ep[base_patch];
-		g_ep_superpatch[ep] = i; //this gives mapping of rank to super-patch
-
-	}
-
-
-	/*MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	if(rank==0)
-		for(int i=0; i<g_patch_ep.size(); i++)
-			printf("patch assignment: %d %d\n", i, g_patch_ep[i]);*/
 }
 
 //Quick  and really really dirty. Try improving later. should be called after assignPatchToEP.
@@ -164,34 +217,6 @@ void getMyPatches( std::vector<int>& my_patches, int my_rank)
 	}
 }
 
-/*
-1. Loop over my patches. For every patch:
-2. Loop over (-1, -1, -1) to (1, 1, 1). Calculate offset for every direction (i, j, k) and add it to the current patch to get neighboring patch
-3. Find proc of neighbor patch. Add it if its not same as self.
-*/
-/*void findNeighbors(std::vector<RankDir> & neighbors, std::vector<int>& my_patches, int x_patches, int y_patches, int z_patches, int rank){
-
-	for(int p : my_patches){	
-		int iid = p / (y_patches*x_patches);
-		int jid = (p % (y_patches*x_patches)) / x_patches;
-		int kid = p % x_patches;
-
-		for(int i=iid-1; i<iid+2; i++)
-		for(int j=jid-1; j<jid+2; j++)
-		for(int k=kid-1; k<kid+2; k++){
-			if(i > -1 && i < z_patches && j > -1 && j < y_patches && k > -1 && k < x_patches){
-				int neighbor = i * y_patches * x_patches + j * x_patches + k;
-				int proc = g_patch_ep[neighbor];
-				if(proc != rank){
-					//printf("pushing neighbours %d %d %d %d %d\n",k-kid, j-jid, i-iid, rank, proc);
-					neighbors.push_back(RankDir(k-kid, j-jid, i-iid, rank, proc)); //for send
-					neighbors.push_back(RankDir(k-kid, j-jid, i-iid, proc, rank)); //for recv
-					//if(rank==4) 	printf("neighbors %d %d %d %d %d\n", neighbor, i, j, k, p);
-				}
-			}
-		}		
-	}
-}*/
 
 void hypre_solve(const char * exp_type, xmlInput input)
 {
@@ -223,10 +248,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	std::vector<int> my_patches;
 	getMyPatches( my_patches, rank );
 
-	//std::vector<RankDir> neighbors;
-	//findNeighbors(neighbors, my_patches, input.xpatches, input.ypatches, input.zpatches, rank); //assuming EP.
-
-	createCommMap(g_ep_superpatch.data(), g_superpatches, input.xthreads, input.ythreads, input.zthreads);	//in hypre_mpi_ep_helper.h
+	createCommMap(g_ep_superpatch.data(), g_superpatches, g_num_of_ranks3d, input.xthreads, input.ythreads, input.zthreads);	//in hypre_mpi_ep_helper.h
 
 	int patches_per_rank = my_patches.size();
 	int x_dim = input.patch_size, y_dim = input.patch_size, z_dim = input.patch_size;
@@ -250,14 +272,13 @@ void hypre_solve(const char * exp_type, xmlInput input)
 		//printf("%d/%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", rank, size, patch_id, low[i].value[0], low[i].value[1], low[i].value[2], high[i].value[0], high[i].value[1], high[i].value[2]);
 	}
 
-	//All patches will have same values. Hence just create 1 patch for A and 1 for B. Pass same values again and again for every patch.
 	//ViewDouble X("X", x_dim * y_dim * z_dim), B("B", x_dim * y_dim * z_dim);
 	//ViewStencil4 A("A", x_dim * y_dim * z_dim);
-	Stencil4 A[x_dim * y_dim * z_dim];
-	double X[x_dim * y_dim * z_dim], B[x_dim * y_dim * z_dim];
+	Stencil4 A[x_dim * y_dim * z_dim * patches_per_rank];
+	double X[x_dim * y_dim * z_dim * patches_per_rank], B[x_dim * y_dim * z_dim * patches_per_rank];
 
 //	Kokkos::parallel_for(Kokkos::RangePolicy<KernelSpace>(0, x_dim * y_dim * z_dim), KOKKOS_LAMBDA(int i){
-	for(int i=0; i<x_dim * y_dim * z_dim; i++){
+	for(int i=0; i<x_dim * y_dim * z_dim * patches_per_rank; i++){
 			A[i].p = 6; A[i].n=-1; A[i].e=-1; A[i].t=-1;
 			B[i] = 1;
 			X[i] = 0;
@@ -289,7 +310,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	bool HA_created = false;
 	bool HX_created = false;
 
-	for(int timestep=0; timestep<6; timestep++)
+	for(int timestep=0; timestep<11; timestep++)
 	{
 		_hypre_comm_time = 0.0;
 		auto start = std::chrono::system_clock::now();
@@ -330,7 +351,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 			int stencil_indices[] = {0,1,2,3};
 
 			for(int i=0; i<patches_per_rank; i++){
-				double *values = reinterpret_cast<double *>(A);
+				double *values = reinterpret_cast<double *>(&A[i * x_dim * y_dim * z_dim]);
 				HYPRE_StructMatrixSetBoxValues(*HA, low[i].value, high[i].value,
 						4, stencil_indices,
 						values);
@@ -342,7 +363,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 		//set up RHS
 
 		for(int i=0; i<patches_per_rank; i++)
-			HYPRE_StructVectorSetBoxValues(*HB, low[i].value, high[i].value, B);
+			HYPRE_StructVectorSetBoxValues(*HB, low[i].value, high[i].value, &B[i * x_dim * y_dim * z_dim]);
 
 		if(do_setup)
 			HYPRE_StructVectorAssemble(*HB);
@@ -420,7 +441,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 		}
 
 		for(int i=0; i<patches_per_rank; i++)
-			HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, X);
+			HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, &X[i * x_dim * y_dim * z_dim]);
 
 		auto end = std::chrono::system_clock::now();
 		std::chrono::duration<double> comp_time = end - start;
@@ -447,7 +468,8 @@ void hypre_solve(const char * exp_type, xmlInput input)
 			timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm << 
 			"\n" ;
 
-		//verifyX(X, x_dim * y_dim * z_dim);
+		if(input.verify==1)
+			verifyX(X, x_dim * y_dim * z_dim, my_patches);
 	}//for(int timestep=0; timestep<11; timestep++)
 
 
@@ -500,7 +522,7 @@ int main(int argc1, char **argv1)
 
 		if(rank ==0) printf("Number of threads %d\n", threads);
 
-		assignPatchToEP(input, size, threads); //assuming EP.
+		assignPatchToEP(input, rank, size, threads); //assuming EP.
 
 		hypre_set_num_threads(threads, omp_get_thread_num);
 		//cudaProfilerStart();

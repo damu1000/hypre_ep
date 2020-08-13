@@ -2018,7 +2018,7 @@ Entries are expected to be symmetric at this time.*/
 };
 #endif
 
-void createCommMap(int *ep_superpatch, int *super_dims, int xthreads, int ythreads, int zthreads);
+void createCommMap(int *ep_superpatch, int *super_dims, int *rank_dims, int xthreads, int ythreads, int zthreads);
 
 #ifdef __cplusplus
 }
