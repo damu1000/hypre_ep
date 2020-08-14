@@ -13,14 +13,14 @@ cd hypre_ep/src
 
 mkdir build
 
-./configure --prefix=`pwd`/build CC=mpicxx CXX=mpicxx F77=mpif77 CFLAGS="-fPIC -O3-g" CXXFLAGS="-fPIC -O3 -g"
+./configure --prefix=`pwd`/build CC=mpicxx CXX=mpicxx F77=mpif77 CFLAGS="-fPIC -O3 -g" CXXFLAGS="-fPIC -O3 -g"
 
 make -j32 install
 
 ### hypre_cpu/src:
 This is the baseline CPU version with timing code added in MPI wrappers to measure communication time. 
 
-Configure line for MPI everywhere (1 thread per mpi rank): ./configure --prefix=`pwd`/build CC=mpicxx CXX=mpicxx F77=mpif77 CFLAGS="-fPIC -O3-g" CXXFLAGS="-fPIC -O3 -g"
+Configure line for MPI everywhere (1 thread per mpi rank): ./configure --prefix=`pwd`/build CC=mpicxx CXX=mpicxx F77=mpif77 CFLAGS="-fPIC -O3 -g" CXXFLAGS="-fPIC -O3 -g"
 
 Configure line for MPI + OpenMP: ./configure --prefix=`pwd`/build CC=mpicxx CXX=mpicxx F77=mpif77 CFLAGS="-fPIC -O3-g" CXXFLAGS="-fPIC -O3 -g" --with-openmp
 
