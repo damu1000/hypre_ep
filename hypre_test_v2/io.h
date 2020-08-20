@@ -90,6 +90,8 @@ struct xmlInput{
 	int ythreads{1}; // number of threads in y dimension (threads will be arranged in 3d grid)
 	int zthreads{1}; // number of threads in z dimension (threads will be arranged in 3d grid)
 	int verify{0};
+	int timesteps{10};
+	int output_interval{10};
 };
 
 
@@ -128,6 +130,10 @@ xmlInput parseInput(const char * file, int rank){
     		   input.zthreads = atoi(val.c_str());
     	   }else if(name == "verify"){
     		   input.verify = atoi(val.c_str());
+    	   }else if(name == "timesteps"){
+    		   input.timesteps = atoi(val.c_str());
+    	   }else if(name == "output_interval"){
+    		   input.output_interval = atoi(val.c_str());
     	   }
     	   else{
     		   printf("input element %s is not supported at %s:%d\n", cur->name, __FILE__, __LINE__);

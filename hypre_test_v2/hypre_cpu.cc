@@ -14,6 +14,8 @@ export HYPRE_PATH=/home/damodars/hypre_ep/hypre_cpu/src/build
 export KOKKOS_PATH=/home/damodars/uintah_kokkos_dev/kokkos/kokkos_openmp/build
 
 mpicxx hypre_cpu.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
+
+CC hypre_cpu.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu -dynamic
  */
 
 #include<chrono>
@@ -77,6 +79,16 @@ int get_affinity() {
     return core;
 }
 
+void set_affinity( const int proc_unit )
+{
+  cpu_set_t mask;
+  unsigned int len = sizeof(mask);
+  CPU_ZERO(&mask);
+  CPU_SET(proc_unit, &mask);
+  sched_setaffinity(0, len, &mask);
+}
+
+
 int main(int argc, char **argv)
 {
 	int cpu_affinity = get_affinity();
@@ -96,6 +108,7 @@ int main(int argc, char **argv)
 		int rank, size;
 		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 		MPI_Comm_size(MPI_COMM_WORLD, &size);
+		set_affinity(rank);
 
 		if(argc != 3){
 			printf("Enter arguments id_string and input file name. exiting\n");
@@ -180,7 +193,7 @@ int main(int argc, char **argv)
 		bool HA_created = false;
 		bool HX_created = false;
 
-		for(int timestep=0; timestep<11; timestep++)
+		for(int timestep=0; timestep<input.timesteps; timestep++)
 		{
 			_hypre_comm_time = 0.0;
 			auto start = std::chrono::system_clock::now();
@@ -311,31 +324,32 @@ int main(int argc, char **argv)
 			for(int i=0; i<patches_per_rank; i++)
 				HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, &X[i * x_dim * y_dim * z_dim]);
 			
-			auto end = std::chrono::system_clock::now();
-			std::chrono::duration<double> comp_time = end - start;
-			std::chrono::duration<double> solve_time = solve_only_end - solve_only_start;
-			
-			double t_comp_time, avg_comp_time=0.0, t_solve_time, avg_solve_time=0.0, avg_comm_time=0.0;
-			t_comp_time = comp_time.count();
-			t_solve_time = solve_time.count();
+			if((timestep % input.output_interval == 0 || timestep == input.timesteps-1)){
+				auto end = std::chrono::system_clock::now();
+				std::chrono::duration<double> comp_time = end - start;
+				std::chrono::duration<double> solve_time = solve_only_end - solve_only_start;
 
-			MPI_Reduce(&_hypre_comm_time, &avg_comm_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);			
-			MPI_Reduce(&t_comp_time, &avg_comp_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-			MPI_Reduce(&t_solve_time, &avg_solve_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-			
-			avg_comm_time /= size;
-			avg_comp_time /= size;
-			avg_solve_time /= size;
-			
-			std::cout.precision(2);
-				//exp_type			//size			num_cells   		input.patch_size   		input.xpatches    		input.ypatches   		input.zpatches
-				//timestep			 total_time				solve_only_time			avg_comm_time				num_iterations			final_res_norm
-			if(rank==0)
-				std::cout <<
-				exp_type << "\t" << size << "\t" << num_cells << "\t" << input.patch_size << "\t" << input.xpatches << "\t" << input.ypatches << "\t" << input.zpatches << "\t" <<
-				timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm << 
-				"\n" ;
+				double t_comp_time, avg_comp_time=0.0, t_solve_time, avg_solve_time=0.0, avg_comm_time=0.0;
+				t_comp_time = comp_time.count();
+				t_solve_time = solve_time.count();
 
+				MPI_Reduce(&_hypre_comm_time, &avg_comm_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+				MPI_Reduce(&t_comp_time, &avg_comp_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+				MPI_Reduce(&t_solve_time, &avg_solve_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+				avg_comm_time /= size;
+				avg_comp_time /= size;
+				avg_solve_time /= size;
+
+				std::cout.precision(2);
+					//exp_type			//size			num_cells   		input.patch_size   		input.xpatches    		input.ypatches   		input.zpatches
+					//timestep			 total_time				solve_only_time			avg_comm_time				num_iterations			final_res_norm
+				if(rank==0)
+					std::cout <<
+					exp_type << "\t" << size << "\t" << num_cells << "\t" << input.patch_size << "\t" << input.xpatches << "\t" << input.ypatches << "\t" << input.zpatches << "\t" <<
+					timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm <<
+					"\n" ;
+			}
 			//dont enable both at the same time :)
 			if(input.verify)
 				write_to_file(X, x_dim * y_dim * z_dim, patches_per_rank);
@@ -345,6 +359,7 @@ int main(int argc, char **argv)
 
 		//----------------------------------------------------------------------------------------------------------------------------------------------------------
 
+		if(rank ==0) printf("Solved successfully\n");
 		//clean up
 		HYPRE_StructStencilDestroy(stencil);
 		HYPRE_StructGridDestroy(grid);

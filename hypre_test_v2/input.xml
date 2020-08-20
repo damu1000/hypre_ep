@@ -10,7 +10,6 @@ int ypatches: number of patches in y dimension
 int zpatches: number of patches in z dimension
 
 Optional:
-int verify: 0 or 1: verify answers if set to 1. Default 0 
 
 ## following are used only by hypre_cpu_ep.cc to virtually arrange threads in 3dimension and distribute patches accordingly.
 e.g. consider 3d grid of 4x4x1 patches. for threads 2x2x1 and 4 ranks, rank 0 will get patches 0, 1, 4, 5
@@ -22,19 +21,24 @@ int zthreads: number of threads in z dimension (threads will be arranged in 3d g
 xthreads * ythreads * zthreads will override OMP_NUM_THREADS
 To get simple hardcoded mapping similar to the one used in hypre_cpu.cc, set xthreads=#threads, ythreads=1 and zthreads=1
 
+int verify: 0 or 1: verify answers if set to 1. Default 0 
+
+
 -->
 
 <input>
 
 <patch_size>16</patch_size>
 <xpatches>4</xpatches>
-<ypatches>4</ypatches>
-<zpatches>4</zpatches>
+<ypatches>2</ypatches>
+<zpatches>2</zpatches>
 
 <xthreads>2</xthreads>
 <ythreads>2</ythreads>
 <zthreads>2</zthreads>
 
 <verify>0</verify>
+<timesteps>10</timesteps>
+<output_interval>1</output_interval>
 
 </input>

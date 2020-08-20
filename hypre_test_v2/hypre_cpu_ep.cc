@@ -20,6 +20,7 @@ mpicxx 2_hypre_gpu.cc -std=c++11 -I/home/damodars/uintah_kokkos_dev/hypre_kokkos
 
  mpicxx hypre_cpu_ep.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src/ -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2  -g -O3 -o 2_ep -fopenmp
 
+CC hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -lxml2 -g -O3 -fopenmp -ldl -o 2_ep -dynamic
  */
 
 //#include <cuda_profiler_api.h>
@@ -87,6 +88,15 @@ int get_affinity() {
 		//printf("affinity: %d\n", core);
 	}
 	return core;
+}
+
+void set_affinity( const int proc_unit )
+{
+  cpu_set_t mask;
+  unsigned int len = sizeof(mask);
+  CPU_ZERO(&mask);
+  CPU_SET(proc_unit, &mask);
+  sched_setaffinity(0, len, &mask);
 }
 
 //patches numbers are always assigned serially. EP assignment logic may vary.
@@ -231,6 +241,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	int rank, size;
 	hypre_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	hypre_MPI_Comm_size(MPI_COMM_WORLD, &size);
+	set_affinity(rank);
 
 	if(number_of_patches % size != 0){
 		printf("Ensure total number of patches (patches cube) is divisible number of ranks at %s:%d. exiting\n", __FILE__, __LINE__);
@@ -310,7 +321,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	bool HA_created = false;
 	bool HX_created = false;
 
-	for(int timestep=0; timestep<11; timestep++)
+	for(int timestep=0; timestep<input.timesteps; timestep++)
 	{
 		_hypre_comm_time = 0.0;
 		auto start = std::chrono::system_clock::now();
@@ -443,30 +454,36 @@ void hypre_solve(const char * exp_type, xmlInput input)
 		for(int i=0; i<patches_per_rank; i++)
 			HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, &X[i * x_dim * y_dim * z_dim]);
 
-		auto end = std::chrono::system_clock::now();
-		std::chrono::duration<double> comp_time = end - start;
-		std::chrono::duration<double> solve_time = solve_only_end - solve_only_start;
+		if((timestep % input.output_interval == 0 || timestep == input.timesteps-1)){
 
-		double t_comp_time, avg_comp_time=0.0, t_solve_time, avg_solve_time=0.0, avg_comm_time=0.0;
-		t_comp_time = comp_time.count();
-		t_solve_time = solve_time.count();
+			auto end = std::chrono::system_clock::now();
+			std::chrono::duration<double> comp_time = end - start;
+			std::chrono::duration<double> solve_time = solve_only_end - solve_only_start;
 
-		hypre_MPI_Allreduce(&_hypre_comm_time, &avg_comm_time, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);			
-		hypre_MPI_Allreduce(&t_comp_time, &avg_comp_time, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-		hypre_MPI_Allreduce(&t_solve_time, &avg_solve_time, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+			double t_comp_time, avg_comp_time=0.0, t_solve_time, avg_solve_time=0.0, avg_comm_time=0.0;
 
-		avg_comm_time /= size;
-		avg_comp_time /= size;
-		avg_solve_time /= size;
+			t_comp_time = comp_time.count();
+			t_solve_time = solve_time.count();
 
-		std::cout.precision(2);
-		//exp_type			//size			num_cells   		patch_size   		x_patches    		y_patches   		z_patches
-		//timestep			 total_time				solve_only_time			avg_comm_time				num_iterations			final_res_norm
-		if(rank==0 && omp_get_thread_num()==0)
-			std::cout <<
-			exp_type << "\t" << size << "\t" << num_cells << "\t" << input.patch_size << "\t" << input.xpatches << "\t" << input.ypatches << "\t" << input.zpatches << "\t" <<
-			timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm << 
-			"\n" ;
+			hypre_MPI_Allreduce(&_hypre_comm_time, &avg_comm_time, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+			hypre_MPI_Allreduce(&t_comp_time, &avg_comp_time, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+			hypre_MPI_Allreduce(&t_solve_time, &avg_solve_time, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+			avg_comm_time /= size;
+			avg_comp_time /= size;
+			avg_solve_time /= size;
+
+
+			if(rank==0 && omp_get_thread_num()==0){
+				std::cout.precision(2);
+			//exp_type			//size			num_cells   		patch_size   		x_patches    		y_patches   		z_patches
+			//timestep			 total_time				solve_only_time			avg_comm_time				num_iterations			final_res_norm
+				std::cout <<
+				exp_type << "\t" << size << "\t" << num_cells << "\t" << input.patch_size << "\t" << input.xpatches << "\t" << input.ypatches << "\t" << input.zpatches << "\t" <<
+				timestep << "\t" << avg_comp_time << "\t" << avg_solve_time << "\t" << avg_comm_time << "\t" << num_iterations << "\t" << final_res_norm <<
+				"\n" ;
+			}
+		}
 
 		if(input.verify==1)
 			verifyX(X, x_dim * y_dim * z_dim, my_patches);
@@ -539,7 +556,7 @@ int main(int argc1, char **argv1)
 			hypre_solve(exp_type, input);
 		}
 		//cudaProfilerStop();
-		
+		if(rank ==0) printf("Solved successfully\n");
 		MPI_Finalize();			
 
 
