@@ -1024,21 +1024,12 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
     * post receives and initiate sends
     *--------------------------------------------------------------------*/
 
+   //interchanged send recv sequence. Post send first so that there is higher probability of
+   //sends being available when recvs of interthread comm (in hypre_mpi_ep_helper.h) are called.
+   //interthread comm return MPI_REQUEST_NULL into MPI_Request. decrement number of requests
+   //in that case and do not update "requests" buffer
+
    j = 0;
-   for(i = 0; i < num_recvs; i++)
-   {
-      comm_type = hypre_CommPkgRecvType(comm_pkg, i);
-      hypre_MPI_Irecv(recv_buffers[i],
-                      hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex),
-                      hypre_MPI_BYTE, hypre_CommTypeProc(comm_type),
-                      tag, comm, &requests[j++]);
-      if ( hypre_CommPkgFirstComm(comm_pkg) )
-      {
-         size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
-         hypre_CommTypeBufsize(comm_type)   -= size;
-         hypre_CommPkgRecvBufsize(comm_pkg) -= size;
-      }
-   }
 
    for(i = 0; i < num_sends; i++)
    {
@@ -1046,12 +1037,39 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
       hypre_MPI_Isend(send_buffers[i],
                       hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex),
                       hypre_MPI_BYTE, hypre_CommTypeProc(comm_type),
-                      tag, comm, &requests[j++]);
+                      tag, comm, &requests[j]);
+
+      if(requests[j] != MPI_REQUEST_NULL)
+    	  j++;
+      else
+    	  num_requests--;
+
       if ( hypre_CommPkgFirstComm(comm_pkg) )
       {
          size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
          hypre_CommTypeBufsize(comm_type)   -= size;
          hypre_CommPkgSendBufsize(comm_pkg) -= size;
+      }
+   }
+
+   for(i = 0; i < num_recvs; i++)
+   {
+      comm_type = hypre_CommPkgRecvType(comm_pkg, i);
+      hypre_MPI_Irecv(recv_buffers[i],
+                      hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex),
+                      hypre_MPI_BYTE, hypre_CommTypeProc(comm_type),
+                      tag, comm, &requests[j]);
+
+      if(requests[j] != MPI_REQUEST_NULL)
+    	  j++;
+      else
+    	  num_requests--;
+
+      if ( hypre_CommPkgFirstComm(comm_pkg) )
+      {
+         size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
+         hypre_CommTypeBufsize(comm_type)   -= size;
+         hypre_CommPkgRecvBufsize(comm_pkg) -= size;
       }
    }
 
@@ -1149,7 +1167,7 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
     * finish communications
     *--------------------------------------------------------------------*/
 
-   if (hypre_CommHandleNumRequests(comm_handle))
+   //if (hypre_CommHandleNumRequests(comm_handle)) //moved this condition within hypre_MPI_Waitall because there could be interthread comm
    {
       hypre_MPI_Waitall(hypre_CommHandleNumRequests(comm_handle),
                         hypre_CommHandleRequests(comm_handle),

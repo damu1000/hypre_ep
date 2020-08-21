@@ -7,6 +7,10 @@
 #include <stddef.h>
 #include <atomic>
 
+#define USE_INTER_THREAD_COMM
+#define USE_MULTIPLE_COMMS
+#define USE_ODD_EVEN_COMMS
+
 /************************************************************************************************************************************
 
 Global declaration needed for EP
@@ -16,7 +20,7 @@ Global declaration needed for EP
 volatile int g_num_of_threads = 0;	//total number of threads.
 //tag multipliers. assuming default values of 8,8,16 -> from LSB to MSB, 16 bits for tag, 8 bits for dest thread id, 8 bits for src thread id
 int dest_multiplier = 0x00010000, src_multiplier=0x01000000, src_eliminate_and=0x00ffffff;
-//int new_tag = tag == MPI_ANY_TAG ? MPI_ANY_TAG : (src_thread * 0x01000000) + (dest_thread * 0x00010000) + tag % 0x00010000; coverted to
+//int new_tag = tag == MPI_ANY_TAG ? MPI_ANY_TAG : (src_thread * 0x01000000) + (dest_thread * 0x00010000) + tag % 0x00010000; converted to
 //int new_tag = tag == MPI_ANY_TAG ? MPI_ANY_TAG : (src_thread * src_multiplier) + (dest_thread * dest_multiplier) + tag % dest_multiplier;
 
 
@@ -37,123 +41,89 @@ cudaStream_t *g_streams;
 intra-rank send-recv without MPI
 
 ************************************************************************************************************************************/
+//This is hypre specific case where data is packed. As a result, ALWAYs only ONE message is sent from one source to one destination
+//during one exchange (i.e. one wait_all). So assuming max possible number of messages is #threads x #threads and allocating the buffer
+//accordingly. Also not doing any validations such as tags, message size etc. because those happen in MPI. So if MPI Only works,
+//this also should ideally work as long as threads wait for each other to send, receive and complete the oprations.
 
+#include<thread>
 
 thread_local bool do_setup=true;
 
-//prefix ir refers intra-rank. Implementing following buffers to exchange intra rank data. Lockless.
-struct irMessage{
-  int tag{-1};
-	int size{0}; //size in bytes
-	volatile int consumed{0};	//sender sets to 0. receiver sets to 1. sender checks the flag in test/wait for it to be 1. receiver waits if the flag is not 1.
-	void * buf{NULL};
-	volatile struct irMessage * next{NULL};
-
-	irMessage(){}
-	irMessage(int _tag, int _size, void * _buf): tag(_tag), size(_size), consumed(0), buf(_buf), next(NULL){}
-};
-
-struct irMessage *g_ir_recv, *g_ir_send; //compute index as g_thread_id * g_num_of_threads + src/dest thread id for recv/send. First index will always belong to owner thread
+void ** g_send_buff;
+void ** g_recv_buff;
+int * g_size_buff; //receiver size
+thread_local int recv_count=0, recv_done=0;
 
 void irInsertMessage(const char* type, //hardcode as "send" or "recv". Used for debugging
-		struct irMessage * queue,
 		void               *buf,
 		HYPRE_Int           count,
 		hypre_MPI_Datatype  datatype,
 		HYPRE_Int           tid,	//this is dest/src thread id
 		HYPRE_Int           tag)
 {
-	int size, qid;
-	MPI_Type_size(datatype, &size);	
-	size = size*count;	//size in bytes;
+	if(type[0]=='r'){ //receive
+		void **rbuf = &g_recv_buff[g_thread_id * g_num_of_threads];
+		int *size= &g_size_buff[g_thread_id * g_num_of_threads];
 
-	volatile struct irMessage *head = &queue[g_thread_id * g_num_of_threads + tid], *prev= head;
+		//try to progress
+		for(int i=0; i<g_num_of_threads; i++){
+			if(rbuf[i] != NULL){//data is received
+				if(g_send_buff[i * g_num_of_threads + g_thread_id] != NULL){
+					memcpy(rbuf[i], g_send_buff[i * g_num_of_threads + g_thread_id], size[i]);
+					size[i] = 0;
+					rbuf[i] = NULL;
+					g_send_buff[i * g_num_of_threads + g_thread_id] = NULL;
+					recv_done++;
+				}
+			}
+		}
 
-	//search if message with same src/dest and same tag already present. error if so.
-	for(volatile struct irMessage *curr = head->next; curr != NULL; prev = curr, curr = curr->next){
-		if(curr->tag == tag){
-			printf("### error: %d %s: %s %d tag %d already present at %s:%d ###\n", g_thread_id, type, (type == "send" ? "dest" : "src"), tid, tag, __FILE__, __LINE__); fflush(stdout);
-			exit(1);
+		if(g_send_buff[tid * g_num_of_threads + g_thread_id] != NULL){//copy at once if sender has sent data
+			memcpy(buf, g_send_buff[tid * g_num_of_threads + g_thread_id], count);
+			g_send_buff[tid * g_num_of_threads + g_thread_id] = NULL;
+			recv_count++;
+			recv_done++;
+		}
+		else{
+			recv_count++;
+			size[tid] = count;
+			rbuf[tid] = buf; //tid is src
 		}
 	}
-	prev->next = new irMessage(tag, size, buf);	//message not found. add new node
+	else //send
+		g_send_buff[g_thread_id * g_num_of_threads + tid] = buf; //tid is dest
 }
 
-void irClear(struct irMessage * queue){
-	for(int tid=0; tid<g_num_of_threads; tid++){
-		volatile struct irMessage *head = &queue[g_thread_id * g_num_of_threads + tid];
-		volatile struct irMessage *prev = head, *curr = head->next;
-		while(curr){
-			prev = curr;
-			curr = curr->next;	
-			delete[] prev;		
-		}
-		head->next = NULL;	//cut from the queue.
-	}
-}
 
-int irTestAll()
+int irWaitAll()
 {
-  int done=0, doner=0, dones=0, countr=0, counts=0;
-
-	//check recv queue
-	for(int tid=0; tid<g_num_of_threads; tid++){	//checking recv queue. so tid is sender's id.
-
-		volatile struct irMessage *curr = g_ir_recv[g_thread_id * g_num_of_threads + tid].next;
-
-		while(curr){
-
-			if(curr->consumed==0){	//check sender's queue if the message is not received
-				volatile struct irMessage *sendcurr = g_ir_send[tid * g_num_of_threads + g_thread_id].next;
-				while(sendcurr){	//search send queue
-					if(sendcurr->tag == curr->tag && sendcurr->consumed==0){ //tag matching and sender's message not consumed
-						if(sendcurr->size > curr->size){
-							printf("### error:%d send (from %d to %d) is larger. sendsize %d, recvsize %d, tag %d  at %s:%d ###\n", 
-											g_thread_id, tid, g_thread_id, sendcurr->size, curr->size,  curr->tag, __FILE__, __LINE__); fflush(stdout);
-							exit(1);
-						}
-						memcpy(curr->buf, sendcurr->buf, sendcurr->size);
-						curr->consumed=1;
-						sendcurr->consumed=1;
-						break;
-					}////tag matching and sender's message not consumed
-
-					sendcurr = sendcurr->next;
-
-				}//search send queue
-				
-			}//if(curr->consumed==0)
-
-			if(curr->consumed==1) doner++;
-			countr++;
-			curr = curr->next;	
-
-		}//while(curr)
-
-	}//for(int tid=0; tid<g_num_of_threads; tid++)
-	
-
-	//check send queue
-	for(int tid=0; tid<g_num_of_threads; tid++){	//checking send queue. so tid is recver's id.
-		volatile  struct irMessage *curr = g_ir_send[g_thread_id * g_num_of_threads + tid].next;
-		while(curr){
-			if(curr->consumed==1) dones++;
-			counts++;
-			curr = curr->next;	
+	void **rbuf = &g_recv_buff[g_thread_id * g_num_of_threads];
+	int *size= &g_size_buff[g_thread_id * g_num_of_threads];
+	while(recv_done < recv_count){
+		for(int i=0; i<g_num_of_threads; i++){
+			if(rbuf[i] != NULL){//data is received
+				if(g_send_buff[i * g_num_of_threads + g_thread_id] != NULL)
+				{
+					memcpy(rbuf[i], g_send_buff[i * g_num_of_threads + g_thread_id], size[i]);
+					size[i] = 0;
+					rbuf[i] = NULL;
+					g_send_buff[i * g_num_of_threads + g_thread_id] = NULL;
+					recv_done++;
+				}
+			}
 		}
 	}
 
-	done = (counts == dones && countr == doner) ? 1 : 0;
-	
-	return done;
-}
+	int ircount = recv_count;
+	recv_count=0;
+	recv_done =0;
 
-void irWaitAll()
-{
-	while(irTestAll()==0);
-	irClear(g_ir_send);
-	irClear(g_ir_recv);
-	//printf("%d send recv cleared\n", g_thread_id);	
+	for(int i=0; i<g_num_of_threads; i++){
+		while(g_send_buff[g_num_of_threads * g_thread_id + i] != NULL) std::this_thread::yield();
+	}
+
+	return ircount;
 }
 
 
@@ -163,7 +133,6 @@ Multiple comms for EP
 
 ************************************************************************************************************************************/
 
-#define USE_MULTIPLE_COMMS
 
 #ifdef USE_MULTIPLE_COMMS
 #include <unordered_map>
@@ -196,7 +165,6 @@ namespace std {	//needed for hash of SrcDestKey used by unordered_map
 std::vector<std::unordered_map<SrcDestKey, MPI_Comm>> g_comm_map;
 int *g_ep_superpatch_map;
 int g_x_superpatches, g_y_superpatches, g_z_superpatches;
-//int g_xthreads, g_ythreads, g_zthreads;
 int g_x_ranks, g_y_ranks, g_z_ranks; //sspatches -> super super patches: super super patch is huge patch of all the patches from all the threads of real dest rank
 
 //convert super patch ids from 1d to 3d
@@ -205,17 +173,17 @@ int g_x_ranks, g_y_ranks, g_z_ranks; //sspatches -> super super patches: super s
 	t[1] = (p % (y_patches*x_patches)) / x_patches;			\
 	t[0] = p % x_patches;
 
-void createCommMap(int *ep_superpatch, int *super_dims, int *rank_dims, int xthreads, int ythreads, int zthreads)
-{
-	g_ep_superpatch_map = ep_superpatch;
-	g_x_superpatches = super_dims[0], g_y_superpatches = super_dims[1], g_z_superpatches = super_dims[2];
-	//g_xthreads = xthreads, g_ythreads = ythreads, g_zthreads = zthreads;
-	g_x_ranks = rank_dims[0],  g_y_ranks = rank_dims[1],  g_z_ranks = rank_dims[2];
-
-}
-
 #endif //#ifdef USE_MULTIPLE_COMMS
 
+
+void createCommMap(int *ep_superpatch, int *super_dims, int *rank_dims, int xthreads, int ythreads, int zthreads)
+{
+#ifdef USE_MULTIPLE_COMMS
+	g_ep_superpatch_map = ep_superpatch;
+	g_x_superpatches = super_dims[0], g_y_superpatches = super_dims[1], g_z_superpatches = super_dims[2];
+	g_x_ranks = rank_dims[0],  g_y_ranks = rank_dims[1],  g_z_ranks = rank_dims[2];
+#endif
+}
 
 
 inline MPI_Comm getComm(int src, int dest)
@@ -246,17 +214,17 @@ inline MPI_Comm getComm(int src, int dest)
 		int comm_id = abs(dir[0]) + abs(dir[1]) * 3 + abs(dir[2]) * 9;
 
 		//figure out even / odd and subtract 13 to offset for odd destinations
+#ifdef USE_ODD_EVEN_COMMS
 		int dest_real_rank = dest / g_num_of_threads;
 		OneDtoThreeD(real_rank, dest_real_rank, g_x_ranks, g_y_ranks, g_z_ranks);
-
 		if(real_rank[0]%2 == 1 || real_rank[1]%2 == 1 || real_rank[2]%2 == 1)
 			comm_id = comm_id + 14; //subtract 13 to offset for odd destinations
-
+#endif
 
 		//pick comm from dest thread's queue with offset given by comm_id
 		int dest_thread = dest % g_num_of_threads;
 		comm =  g_comm_pool[dest_thread*COMMS_PER_THREAD + comm_id];
-		printf("%d added comm for src %d dest %d comm_id %d\n", g_rank, src, dest, comm_id);
+//		printf("%d added comm for src %d dest %d comm_id %d\n", g_rank, src, dest, comm_id);
 		g_comm_map[g_thread_id][key] = comm;
 	}
 #endif //#ifdef USE_MULTIPLE_COMMS
@@ -524,9 +492,6 @@ void hypre_set_num_threads(int n, int (*f)())	//call from master thread BEFORE w
 	}
 	std::atomic_flag_clear(&gProbeLock);
 
-	g_ir_send = new struct irMessage[g_num_of_threads*g_num_of_threads];
-	g_ir_recv = new struct irMessage[g_num_of_threads*g_num_of_threads];
-
 #if defined(HYPRE_USING_CUDA) 
 	g_streams = (cudaStream_t*) malloc(g_num_of_threads * sizeof(cudaStream_t));
 	for (int i = 0; i < g_num_of_threads; i++) 
@@ -542,6 +507,17 @@ void hypre_set_num_threads(int n, int (*f)())	//call from master thread BEFORE w
 
 	g_comm_map.resize(g_num_of_threads);
 #endif //#ifdef USE_MULTIPLE_COMMS
+
+
+	g_send_buff = new void* [g_num_of_threads*g_num_of_threads];
+	g_recv_buff = new void* [g_num_of_threads*g_num_of_threads];
+	g_size_buff = new int[g_num_of_threads*g_num_of_threads]; //receiver size
+
+	for(int i=0;i<g_num_of_threads*g_num_of_threads; i++){
+		g_send_buff[i] = NULL;
+		g_recv_buff[i] = NULL;
+		g_size_buff[i] = 0;
+	}
 
 }
 
@@ -610,15 +586,15 @@ void hypre_destroy_thread()	//ideally should be called after every call to multi
 	#endif //#if defined(HYPRE_USING_CUDA)
 
 
-		delete []g_ir_send;
-		delete []g_ir_recv;
-
-
 #ifdef USE_MULTIPLE_COMMS	
 	for(int i=0; i<g_num_of_threads * COMMS_PER_THREAD; i++)
 		MPI_Comm_free( &g_comm_pool[i] );
 	delete []g_comm_pool;
 #endif //#ifdef USE_MULTIPLE_COMMS
+	delete []g_send_buff;
+	delete []g_recv_buff;
+	delete []g_size_buff;
+
 	}
 
 }

@@ -1203,12 +1203,13 @@ hypre_MPI_Isend( void               *buf,
 	new_tag = (src_thread * src_multiplier) + (dest_thread * dest_multiplier) + tag % dest_multiplier;
 
 	//printf("%d isend: dest %d tag %d size %d real_dest %d g_real_rank %d\n", g_thread_id, dest, tag, count, real_dest, g_real_rank);
-
+#ifdef USE_INTER_THREAD_COMM
 	if(real_dest == g_real_rank && do_setup==false){
-		irInsertMessage("send", g_ir_send, buf, count, datatype, dest_thread, tag);
+		irInsertMessage("send", buf, count, datatype, dest_thread, tag);
 		*request = MPI_REQUEST_NULL;
 		return MPI_SUCCESS;
 	}
+#endif
 
 	if(tag > dest_multiplier)
 		printf("###### increase bits for tag by environment variable HYPRE_TAG. %d send: dest %d, real dest %d, tag %d, new_tag %d ########\n", g_rank, dest, real_dest, tag, new_tag);
@@ -1286,11 +1287,13 @@ hypre_MPI_Irecv( void               *buf,
 	
 	//printf("%d irecv: source %d tag %d size %d real_source %d g_real_rank %d\n", g_thread_id, source, tag, count, real_source, g_real_rank);
 
+#ifdef USE_INTER_THREAD_COMM
 	if(real_source == g_real_rank && do_setup==false){
-		irInsertMessage("recv", g_ir_recv, buf, count, datatype, src_thread, tag);
+		irInsertMessage("recv", buf, count, datatype, src_thread, tag);
 		*request = MPI_REQUEST_NULL;
 		return MPI_SUCCESS;
 	}
+#endif
 
 	if(source == MPI_ANY_SOURCE && tag != MPI_ANY_TAG)	//not handled cause we need to know src_thread to calculate new_tag
 			printf("condition of source == MPI_ANY_SOURCE && tag != MPI_ANY_TAG is NOT handled in hypre_MPI_Irecv\n");
@@ -1724,12 +1727,6 @@ hypre_MPI_Testall( HYPRE_Int          count,
 			&mpi_flag, array_of_statuses);
 	*flag = (HYPRE_Int) mpi_flag;
 
-	int done = irTestAll();
-	if(done==0){
-		*flag=0;
-		return ierr;
-	}
-
 	end_time();
 	return ierr;
 }
@@ -1752,12 +1749,15 @@ hypre_MPI_Waitall( HYPRE_Int          count,
 		hypre_MPI_Status  *array_of_statuses )
 {
 	start_time();
+	HYPRE_Int ierr;
 	
-	irWaitAll();
+	int ircount = irWaitAll();
 
-	HYPRE_Int ierr = (HYPRE_Int) MPI_Waitall((hypre_int)count,
+	if(count > 0){
+//		printf("calling mpi_waitall %d %d\n", ircount, count);
+	ierr = (HYPRE_Int) MPI_Waitall((hypre_int)count,
 			array_of_requests, array_of_statuses);
-
+	}
 
 	end_time();
 	return ierr;
