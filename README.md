@@ -15,6 +15,9 @@ mkdir build
 
 ./configure --prefix=`pwd`/build CC=mpicxx CXX=mpicxx F77=mpif77 CFLAGS="-fPIC -O3 -g" CXXFLAGS="-fPIC -O3 -g"
 
+Configure on with intel compiler on AVX512 supported architectures: Add "-fp-model precise -xMIC-AVX512" to CFLAGS and CXXFLAGS.
+Enable vectorization of few key kernels (which is not done by default): Add "-DUSE_SIMD" to CFLAGS and CXXFLAGS. Do this as the last optimization while checking incremental performance of different optimizations.
+
 make -j32 install
 
 ### hypre_cpu/src:
