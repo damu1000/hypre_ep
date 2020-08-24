@@ -58,13 +58,13 @@ hypre_StructAxpy( HYPRE_Complex       alpha,
       hypre_BoxGetSize(box, loop_size);
 	
 #define DEVICE_VAR is_device_ptr(yp,xp)
-      hypre_BoxLoop2Begin(hypre_StructVectorNDim(x), loop_size,
+      hypre_BoxLoop2BeginSimd(hypre_StructVectorNDim(x), loop_size,
 			  x_data_box, start, unit_stride, xi,
 			  y_data_box, start, unit_stride, yi);
       {
          yp[yi] += alpha * xp[xi];
       }
-      hypre_BoxLoop2End(xi, yi);
+      hypre_BoxLoop2EndSimd(xi, yi);
 #undef DEVICE_VAR
    }
 

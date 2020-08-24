@@ -281,17 +281,32 @@ hypre_SemiRestrict( void               *restrict_vdata,
             }
             else
             {
+            	if(stridec[0]==1 && stride[0]==1){
 #define DEVICE_VAR is_device_ptr(rcp,rp,Rp0,Rp1)
-               hypre_BoxLoop3Begin(hypre_StructMatrixNDim(R), loop_size,
-                                   R_dbox,  startc, stridec, Ri,
-                                   r_dbox,  start,  stride,  ri,
-                                   rc_dbox, startc, stridec, rci);
-               {
-                  rcp[rci] = rp[ri] + (Rp0[Ri+Rp0_offset] * rp[ri+rp0_offset] +
-                                       Rp1[Ri]            * rp[ri+rp1_offset]);
-               }
-               hypre_BoxLoop3End(Ri, ri, rci);
+				   hypre_BoxLoop3BeginSimd(hypre_StructMatrixNDim(R), loop_size,
+									   R_dbox,  startc, stridec, Ri,
+									   r_dbox,  start,  stride,  ri,
+									   rc_dbox, startc, stridec, rci);
+				   {
+					  rcp[rci] = rp[ri] + (Rp0[Ri+Rp0_offset] * rp[ri+rp0_offset] +
+										   Rp1[Ri]            * rp[ri+rp1_offset]);
+				   }
+				   hypre_BoxLoop3EndSimd(Ri, ri, rci);
 #undef DEVICE_VAR
+            	}
+            	else{
+#define DEVICE_VAR is_device_ptr(rcp,rp,Rp0,Rp1)
+				   hypre_BoxLoop3Begin(hypre_StructMatrixNDim(R), loop_size,
+									   R_dbox,  startc, stridec, Ri,
+									   r_dbox,  start,  stride,  ri,
+									   rc_dbox, startc, stridec, rci);
+				   {
+					  rcp[rci] = rp[ri] + (Rp0[Ri+Rp0_offset] * rp[ri+rp0_offset] +
+										   Rp1[Ri]            * rp[ri+rp1_offset]);
+				   }
+				   hypre_BoxLoop3End(Ri, ri, rci);
+#undef DEVICE_VAR
+            	}
             }
          }
       }

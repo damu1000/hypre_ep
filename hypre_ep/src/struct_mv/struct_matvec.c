@@ -227,12 +227,22 @@ hypre_StructMatvecCompute( void               *matvec_vdata,
                   {
                      hypre_BoxGetSize(box, loop_size);
 
-                     hypre_BoxLoop1Begin(hypre_StructVectorNDim(x), loop_size,
-                                         y_data_box, start, stride, yi);
-                     {
-                        yp[yi] *= temp;
+                     if(stride[0]==1){
+						 hypre_BoxLoop1BeginSimd(hypre_StructVectorNDim(x), loop_size,
+											 y_data_box, start, stride, yi);
+						 {
+							yp[yi] *= temp;
+						 }
+						 hypre_BoxLoop1EndSimd(yi);
                      }
-                     hypre_BoxLoop1End(yi);
+                     else{
+						 hypre_BoxLoop1Begin(hypre_StructVectorNDim(x), loop_size,
+											 y_data_box, start, stride, yi);
+						 {
+							yp[yi] *= temp;
+						 }
+						 hypre_BoxLoop1End(yi);
+                     }
                   }
 #undef DEVICE_VAR
                }
@@ -381,24 +391,44 @@ HYPRE_Int hypre_StructMatvecCC0( HYPRE_Complex       alpha,
                   xoff6 = hypre_BoxOffsetDistance(x_data_box,
                                                   stencil_shape[si+6]);
 
+                  if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,Ap6,xp)
-                  hypre_BoxLoop3Begin(ndim, loop_size,
-                                      A_data_box, start, stride, Ai,
-                                      x_data_box, start, stride, xi,
-                                      y_data_box, start, stride, yi);
-                  {
-                     yp[yi] +=
-                        Ap0[Ai] * xp[xi + xoff0] +
-                        Ap1[Ai] * xp[xi + xoff1] +
-                        Ap2[Ai] * xp[xi + xoff2] +
-                        Ap3[Ai] * xp[xi + xoff3] +
-                        Ap4[Ai] * xp[xi + xoff4] +
-                        Ap5[Ai] * xp[xi + xoff5] +
-                        Ap6[Ai] * xp[xi + xoff6];
-                  }
-                  hypre_BoxLoop3End(Ai, xi, yi);
+					  hypre_BoxLoop3BeginSimd(ndim, loop_size,
+										  A_data_box, start, stride, Ai,
+										  x_data_box, start, stride, xi,
+										  y_data_box, start, stride, yi);
+					  {
+						 yp[yi] +=
+							Ap0[Ai] * xp[xi + xoff0] +
+							Ap1[Ai] * xp[xi + xoff1] +
+							Ap2[Ai] * xp[xi + xoff2] +
+							Ap3[Ai] * xp[xi + xoff3] +
+							Ap4[Ai] * xp[xi + xoff4] +
+							Ap5[Ai] * xp[xi + xoff5] +
+							Ap6[Ai] * xp[xi + xoff6];
+					  }
+					  hypre_BoxLoop3EndSimd(Ai, xi, yi);
 #undef DEVICE_VAR
-
+                  }
+                  else{
+#define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,Ap6,xp)
+					  hypre_BoxLoop3Begin(ndim, loop_size,
+										  A_data_box, start, stride, Ai,
+										  x_data_box, start, stride, xi,
+										  y_data_box, start, stride, yi);
+					  {
+						 yp[yi] +=
+							Ap0[Ai] * xp[xi + xoff0] +
+							Ap1[Ai] * xp[xi + xoff1] +
+							Ap2[Ai] * xp[xi + xoff2] +
+							Ap3[Ai] * xp[xi + xoff3] +
+							Ap4[Ai] * xp[xi + xoff4] +
+							Ap5[Ai] * xp[xi + xoff5] +
+							Ap6[Ai] * xp[xi + xoff6];
+					  }
+					  hypre_BoxLoop3End(Ai, xi, yi);
+#undef DEVICE_VAR
+                  }
                   break;
 
                case 6:
@@ -422,22 +452,42 @@ HYPRE_Int hypre_StructMatvecCC0( HYPRE_Complex       alpha,
                   xoff5 = hypre_BoxOffsetDistance(x_data_box,
                                                   stencil_shape[si+5]);
 
+                  if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,xp)
-                  hypre_BoxLoop3Begin(ndim, loop_size,
-                                      A_data_box, start, stride, Ai,
-                                      x_data_box, start, stride, xi,
-                                      y_data_box, start, stride, yi);
-                  {
-                     yp[yi] +=
-                        Ap0[Ai] * xp[xi + xoff0] +
-                        Ap1[Ai] * xp[xi + xoff1] +
-                        Ap2[Ai] * xp[xi + xoff2] +
-                        Ap3[Ai] * xp[xi + xoff3] +
-                        Ap4[Ai] * xp[xi + xoff4] +
-                        Ap5[Ai] * xp[xi + xoff5];
-                  }
-                  hypre_BoxLoop3End(Ai, xi, yi);
+					  hypre_BoxLoop3BeginSimd(ndim, loop_size,
+										  A_data_box, start, stride, Ai,
+										  x_data_box, start, stride, xi,
+										  y_data_box, start, stride, yi);
+					  {
+						 yp[yi] +=
+							Ap0[Ai] * xp[xi + xoff0] +
+							Ap1[Ai] * xp[xi + xoff1] +
+							Ap2[Ai] * xp[xi + xoff2] +
+							Ap3[Ai] * xp[xi + xoff3] +
+							Ap4[Ai] * xp[xi + xoff4] +
+							Ap5[Ai] * xp[xi + xoff5];
+					  }
+					  hypre_BoxLoop3EndSimd(Ai, xi, yi);
 #undef DEVICE_VAR
+                  }
+                  else{
+#define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,xp)
+					  hypre_BoxLoop3Begin(ndim, loop_size,
+										  A_data_box, start, stride, Ai,
+										  x_data_box, start, stride, xi,
+										  y_data_box, start, stride, yi);
+					  {
+						 yp[yi] +=
+							Ap0[Ai] * xp[xi + xoff0] +
+							Ap1[Ai] * xp[xi + xoff1] +
+							Ap2[Ai] * xp[xi + xoff2] +
+							Ap3[Ai] * xp[xi + xoff3] +
+							Ap4[Ai] * xp[xi + xoff4] +
+							Ap5[Ai] * xp[xi + xoff5];
+					  }
+					  hypre_BoxLoop3End(Ai, xi, yi);
+#undef DEVICE_VAR
+                  }
                         
                   break;
 
@@ -459,8 +509,9 @@ HYPRE_Int hypre_StructMatvecCC0( HYPRE_Complex       alpha,
                   xoff4 = hypre_BoxOffsetDistance(x_data_box,
                                                   stencil_shape[si+4]);
 
+                  if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,Ap2,Ap3,Ap4,xp)
-                  hypre_BoxLoop3Begin(ndim, loop_size,
+                  hypre_BoxLoop3BeginSimd(ndim, loop_size,
                                       A_data_box, start, stride, Ai,
                                       x_data_box, start, stride, xi,
                                       y_data_box, start, stride, yi);
@@ -472,9 +523,26 @@ HYPRE_Int hypre_StructMatvecCC0( HYPRE_Complex       alpha,
                         Ap3[Ai] * xp[xi + xoff3] +
                         Ap4[Ai] * xp[xi + xoff4]; 
                   }
-                  hypre_BoxLoop3End(Ai, xi, yi);
+                  hypre_BoxLoop3EndSimd(Ai, xi, yi);
 #undef DEVICE_VAR
-
+                  }
+                  else{
+#define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,Ap2,Ap3,Ap4,xp)
+					  hypre_BoxLoop3Begin(ndim, loop_size,
+										  A_data_box, start, stride, Ai,
+										  x_data_box, start, stride, xi,
+										  y_data_box, start, stride, yi);
+					  {
+						 yp[yi] +=
+							Ap0[Ai] * xp[xi + xoff0] +
+							Ap1[Ai] * xp[xi + xoff1] +
+							Ap2[Ai] * xp[xi + xoff2] +
+							Ap3[Ai] * xp[xi + xoff3] +
+							Ap4[Ai] * xp[xi + xoff4];
+					  }
+					  hypre_BoxLoop3End(Ai, xi, yi);
+#undef DEVICE_VAR
+                  }
                   break;
 
                case 4:
@@ -546,18 +614,34 @@ HYPRE_Int hypre_StructMatvecCC0( HYPRE_Complex       alpha,
                   xoff1 = hypre_BoxOffsetDistance(x_data_box,
                                                   stencil_shape[si+1]);
 
+                  if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,xp)
-                  hypre_BoxLoop3Begin(ndim, loop_size,
-                                      A_data_box, start, stride, Ai,
-                                      x_data_box, start, stride, xi,
-                                      y_data_box, start, stride, yi);
-                  {
-                     yp[yi] +=
-                        Ap0[Ai] * xp[xi + xoff0] +
-                        Ap1[Ai] * xp[xi + xoff1];
-                  }
-                  hypre_BoxLoop3End(Ai, xi, yi);
+					  hypre_BoxLoop3BeginSimd(ndim, loop_size,
+										  A_data_box, start, stride, Ai,
+										  x_data_box, start, stride, xi,
+										  y_data_box, start, stride, yi);
+					  {
+						 yp[yi] +=
+							Ap0[Ai] * xp[xi + xoff0] +
+							Ap1[Ai] * xp[xi + xoff1];
+					  }
+					  hypre_BoxLoop3EndSimd(Ai, xi, yi);
 #undef DEVICE_VAR
+                  }
+                  else{
+#define DEVICE_VAR is_device_ptr(yp,Ap0,Ap1,xp)
+					  hypre_BoxLoop3Begin(ndim, loop_size,
+										  A_data_box, start, stride, Ai,
+										  x_data_box, start, stride, xi,
+										  y_data_box, start, stride, yi);
+					  {
+						 yp[yi] +=
+							Ap0[Ai] * xp[xi + xoff0] +
+							Ap1[Ai] * xp[xi + xoff1];
+					  }
+					  hypre_BoxLoop3End(Ai, xi, yi);
+#undef DEVICE_VAR
+                  }
 
                   break;
 

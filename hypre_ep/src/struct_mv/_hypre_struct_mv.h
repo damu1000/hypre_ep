@@ -2015,6 +2015,118 @@ typedef struct hypre_Boxloop_struct
   }                                                                           \
 }
 
+
+
+#define zypre_newBoxLoop1BeginSimd(ndim, loop_size,                           \
+                               dbox1, start1, stride1, i1)                    \
+{                                                                             \
+   HYPRE_Int i1;                                                              \
+   zypre_BoxLoopDeclare();                                                    \
+   zypre_BoxLoopDeclareK(1);                                                  \
+   zypre_BoxLoopInit(ndim, loop_size);                                        \
+   zypre_BoxLoopInitK(1, dbox1, start1, stride1, i1);                         \
+   OMP1                                                                       \
+   for (hypre__block = 0; hypre__block < hypre__num_blocks; hypre__block++)   \
+   {                                                                          \
+      HYPRE_Int i1;                                                           \
+      zypre_BoxLoopSet();                                                     \
+      zypre_BoxLoopSetK(1, i1);                                               \
+      for (hypre__J = 0; hypre__J < hypre__JN; hypre__J++)                    \
+      {                                                                       \
+		 _Pragma("simd")                                                      \
+         for (hypre__I = 0; hypre__I < hypre__IN; hypre__I++)                 \
+         {
+
+
+#define zypre_newBoxLoop1EndSimd(i1)                                          \
+            i1++;                                                             \
+         }                                                                    \
+         zypre_BoxLoopInc1();                                                 \
+         i1 += hypre__ikinc1[hypre__d];                                       \
+         zypre_BoxLoopInc2();                                                 \
+      }                                                                       \
+   }                                                                          \
+}
+
+#define zypre_newBoxLoop2BeginSimd(ndim, loop_size,                           \
+                               dbox1, start1, stride1, i1,                    \
+                               dbox2, start2, stride2, i2)                    \
+{                                                                             \
+   HYPRE_Int i1, i2;                                                          \
+   zypre_BoxLoopDeclare();                                                    \
+   zypre_BoxLoopDeclareK(1);                                                  \
+   zypre_BoxLoopDeclareK(2);                                                  \
+   zypre_BoxLoopInit(ndim, loop_size);                                        \
+   zypre_BoxLoopInitK(1, dbox1, start1, stride1, i1);                         \
+   zypre_BoxLoopInitK(2, dbox2, start2, stride2, i2);                         \
+   OMP1                                                                       \
+   for (hypre__block = 0; hypre__block < hypre__num_blocks; hypre__block++)   \
+   {                                                                          \
+      HYPRE_Int i1, i2;                                                       \
+      zypre_BoxLoopSet();                                                     \
+      zypre_BoxLoopSetK(1, i1);                                               \
+      zypre_BoxLoopSetK(2, i2);                                               \
+      for (hypre__J = 0; hypre__J < hypre__JN; hypre__J++)                    \
+      {                                                                       \
+ 		 _Pragma("simd")                                                      \
+         for (hypre__I = 0; hypre__I < hypre__IN; hypre__I++)                 \
+         {
+
+#define zypre_newBoxLoop2EndSimd(i1, i2)                                      \
+            i1++;                                                             \
+            i2++;                                                             \
+         }                                                                    \
+         zypre_BoxLoopInc1();                                                 \
+         i1 += hypre__ikinc1[hypre__d];                                       \
+         i2 += hypre__ikinc2[hypre__d];                                       \
+         zypre_BoxLoopInc2();                                                 \
+      }                                                                       \
+   }                                                                          \
+}
+
+#define zypre_newBoxLoop3BeginSimd(ndim, loop_size,                           \
+                               dbox1, start1, stride1, i1,                    \
+                               dbox2, start2, stride2, i2,                    \
+                               dbox3, start3, stride3, i3)                    \
+{                                                                             \
+   HYPRE_Int i1, i2, i3;                                                      \
+   zypre_BoxLoopDeclare();                                                    \
+   zypre_BoxLoopDeclareK(1);                                                  \
+   zypre_BoxLoopDeclareK(2);                                                  \
+   zypre_BoxLoopDeclareK(3);                                                  \
+   zypre_BoxLoopInit(ndim, loop_size);                                        \
+   zypre_BoxLoopInitK(1, dbox1, start1, stride1, i1);                         \
+   zypre_BoxLoopInitK(2, dbox2, start2, stride2, i2);                         \
+   zypre_BoxLoopInitK(3, dbox3, start3, stride3, i3);                         \
+   OMP1                                                                       \
+   for (hypre__block = 0; hypre__block < hypre__num_blocks; hypre__block++)   \
+   {                                                                          \
+      HYPRE_Int i1, i2, i3;                                                   \
+      zypre_BoxLoopSet();                                                     \
+      zypre_BoxLoopSetK(1, i1);                                               \
+      zypre_BoxLoopSetK(2, i2);                                               \
+      zypre_BoxLoopSetK(3, i3);                                               \
+      for (hypre__J = 0; hypre__J < hypre__JN; hypre__J++)                    \
+      {                                                                       \
+  		 _Pragma("simd")                                                      \
+         for (hypre__I = 0; hypre__I < hypre__IN; hypre__I++)                 \
+         {
+
+#define zypre_newBoxLoop3EndSimd(i1, i2, i3)                                  \
+            i1++;                                                             \
+            i2++;                                                             \
+            i3++;           			                                      \
+         }                                                                    \
+         zypre_BoxLoopInc1();                                                 \
+         i1 += hypre__ikinc1[hypre__d];                                       \
+         i2 += hypre__ikinc2[hypre__d];                                       \
+         i3 += hypre__ikinc3[hypre__d];                                       \
+         zypre_BoxLoopInc2();                                                 \
+      }                                                                       \
+   }                                                                          \
+}
+
+
 #define hypre_newBoxLoopGetIndex zypre_BoxLoopGetIndex
 #define hypre_BoxLoopGetIndex    zypre_BoxLoopGetIndex
 #define hypre_BoxLoopSetOneBlock zypre_BoxLoopSetOneBlock
@@ -2030,6 +2142,23 @@ typedef struct hypre_Boxloop_struct
 #define hypre_BoxLoop4Begin      zypre_newBoxLoop4Begin
 #define hypre_BoxLoop4End        zypre_newBoxLoop4End
 #define hypre_BasicBoxLoop2Begin zypre_newBasicBoxLoop2Begin
+
+#ifdef USE_SIMD
+#define hypre_BoxLoop1BeginSimd      zypre_newBoxLoop1BeginSimd
+#define hypre_BoxLoop1EndSimd        zypre_newBoxLoop1EndSimd
+#define hypre_BoxLoop2BeginSimd      zypre_newBoxLoop2BeginSimd
+#define hypre_BoxLoop2EndSimd        zypre_newBoxLoop2EndSimd
+#define hypre_BoxLoop3BeginSimd      zypre_newBoxLoop3BeginSimd
+#define hypre_BoxLoop3EndSimd        zypre_newBoxLoop3EndSimd
+#else
+#define hypre_BoxLoop1BeginSimd      zypre_newBoxLoop1Begin
+#define hypre_BoxLoop1EndSimd        zypre_newBoxLoop1End
+#define hypre_BoxLoop2BeginSimd      zypre_newBoxLoop2Begin
+#define hypre_BoxLoop2EndSimd        zypre_newBoxLoop2End
+#define hypre_BoxLoop3BeginSimd      zypre_newBoxLoop3Begin
+#define hypre_BoxLoop3EndSimd        zypre_newBoxLoop3End
+#endif
+
 
 /* Reduction */
 #define hypre_BoxLoop1ReductionBegin(ndim, loop_size, dbox1, start1, stride1, i1, reducesum) \

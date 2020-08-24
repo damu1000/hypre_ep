@@ -216,15 +216,29 @@ hypre_SemiInterp( void               *interp_vdata,
 
       hypre_BoxGetSize(compute_box, loop_size);
 
+      if(stridec[0]==1 && stride[0]==1){
 #define DEVICE_VAR is_device_ptr(ep,xcp)
-      hypre_BoxLoop2Begin(hypre_StructMatrixNDim(P), loop_size,
-                          e_dbox, start, stride, ei,
-                          xc_dbox, startc, stridec, xci);
-      {
-         ep[ei] = xcp[xci];
-      }
-      hypre_BoxLoop2End(ei, xci);
+		  hypre_BoxLoop2Begin(hypre_StructMatrixNDim(P), loop_size,
+							  e_dbox, start, stride, ei,
+							  xc_dbox, startc, stridec, xci);
+		  {
+			 ep[ei] = xcp[xci];
+		  }
+		  hypre_BoxLoop2End(ei, xci);
 #undef DEVICE_VAR
+      }
+      else{
+#define DEVICE_VAR is_device_ptr(ep,xcp)
+		  hypre_BoxLoop2Begin(hypre_StructMatrixNDim(P), loop_size,
+							  e_dbox, start, stride, ei,
+							  xc_dbox, startc, stridec, xci);
+		  {
+			 ep[ei] = xcp[xci];
+		  }
+		  hypre_BoxLoop2End(ei, xci);
+#undef DEVICE_VAR
+      }
+
    }
 
    /*-----------------------------------------------------------------------
@@ -312,16 +326,30 @@ hypre_SemiInterp( void               *interp_vdata,
             }
             else
             {
+            	if(stridec[0]==1 && stride[0]==1){
 #define DEVICE_VAR is_device_ptr(ep,Pp0,Pp1)
-               hypre_BoxLoop2Begin(hypre_StructMatrixNDim(P), loop_size,
-                                   P_dbox, startc, stridec, Pi,
-                                   e_dbox, start, stride, ei);
-               {
-                  ep[ei] =  (Pp0[Pi]            * ep[ei+ep0_offset] +
-                             Pp1[Pi+Pp1_offset] * ep[ei+ep1_offset]);
-               }
-               hypre_BoxLoop2End(Pi, ei);
+				   hypre_BoxLoop2BeginSimd(hypre_StructMatrixNDim(P), loop_size,
+									   P_dbox, startc, stridec, Pi,
+									   e_dbox, start, stride, ei);
+				   {
+					  ep[ei] =  (Pp0[Pi]            * ep[ei+ep0_offset] +
+								 Pp1[Pi+Pp1_offset] * ep[ei+ep1_offset]);
+				   }
+				   hypre_BoxLoop2EndSimd(Pi, ei);
 #undef DEVICE_VAR
+            	}
+            	else{
+#define DEVICE_VAR is_device_ptr(ep,Pp0,Pp1)
+				   hypre_BoxLoop2Begin(hypre_StructMatrixNDim(P), loop_size,
+									   P_dbox, startc, stridec, Pi,
+									   e_dbox, start, stride, ei);
+				   {
+					  ep[ei] =  (Pp0[Pi]            * ep[ei+ep0_offset] +
+								 Pp1[Pi+Pp1_offset] * ep[ei+ep1_offset]);
+				   }
+				   hypre_BoxLoop2End(Pi, ei);
+#undef DEVICE_VAR
+            	}
             }
          }
       }

@@ -841,23 +841,34 @@ hypre_StructMatrixSetBoxValues( hypre_StructMatrix *matrix,
 
                   if (action > 0)
                   {
-		     hypre_BoxLoop2Begin(hypre_StructMatrixNDim(matrix), loop_size,
-					 data_box,data_start,data_stride,datai,
-					 dval_box,dval_start,dval_stride,dvali);
-		     {
-		        datap[datai] += values[dvali];
-		     }
+					 hypre_BoxLoop2Begin(hypre_StructMatrixNDim(matrix), loop_size,
+							 data_box,data_start,data_stride,datai,
+							 dval_box,dval_start,dval_stride,dvali);
+					 {
+						datap[datai] += values[dvali];
+					 }
                      hypre_BoxLoop2End(datai, dvali);
                   }
                   else if (action > -1)
                   {
-                     hypre_BoxLoop2Begin(hypre_StructMatrixNDim(matrix), loop_size,
-                                         data_box,data_start,data_stride,datai,
-                                         dval_box,dval_start,dval_stride,dvali);
-                     {
-                        datap[datai] = values[dvali];
-                     }
-                     hypre_BoxLoop2End(datai, dvali);
+                	  if(data_stride[0]==1 && dval_stride[0]==1){
+						 hypre_BoxLoop2BeginSimd(hypre_StructMatrixNDim(matrix), loop_size,
+											 data_box,data_start,data_stride,datai,
+											 dval_box,dval_start,dval_stride,dvali);
+						 {
+							datap[datai] = values[dvali];
+						 }
+						 hypre_BoxLoop2EndSimd(datai, dvali);
+                	  }
+                	  else{
+ 						 hypre_BoxLoop2Begin(hypre_StructMatrixNDim(matrix), loop_size,
+ 											 data_box,data_start,data_stride,datai,
+ 											 dval_box,dval_start,dval_stride,dvali);
+ 						 {
+ 							datap[datai] = values[dvali];
+ 						 }
+ 						 hypre_BoxLoop2End(datai, dvali);
+                	  }
                   }
                   else if (action == -2)
                   {

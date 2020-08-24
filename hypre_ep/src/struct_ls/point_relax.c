@@ -478,6 +478,19 @@ hypre_PointRelax( void               *relax_vdata,
                   only) are the same for the diagonal */
                else
                {
+            	   if(stride[0]==1){
+#define DEVICE_VAR is_device_ptr(xp,bp,Ap)
+                  hypre_BoxLoop3BeginSimd(hypre_StructVectorNDim(x), loop_size,
+                                      A_data_box, start, stride, Ai,
+                                      b_data_box, start, stride, bi,
+                                      x_data_box, start, stride, xi);
+                  {
+                     xp[xi] = bp[bi] / Ap[Ai];
+                  }
+                  hypre_BoxLoop3EndSimd(Ai, bi, xi);
+#undef DEVICE_VAR
+            	   }
+            	   else{
 #define DEVICE_VAR is_device_ptr(xp,bp,Ap)
                   hypre_BoxLoop3Begin(hypre_StructVectorNDim(x), loop_size,
                                       A_data_box, start, stride, Ai,
@@ -488,6 +501,7 @@ hypre_PointRelax( void               *relax_vdata,
                   }
                   hypre_BoxLoop3End(Ai, bi, xi);
 #undef DEVICE_VAR
+            	   }
                }
             }
          }
@@ -597,15 +611,29 @@ hypre_PointRelax( void               *relax_vdata,
                {
                   start  = hypre_BoxIMin(compute_box);
                   hypre_BoxGetStrideSize(compute_box, stride, loop_size);
+
+                  if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(tp,Ap)
-                  hypre_BoxLoop2Begin(hypre_StructVectorNDim(x), loop_size,
-                                      A_data_box, start, stride, Ai,
-                                      t_data_box, start, stride, ti);
-                  {
-                     tp[ti] /= Ap[Ai];
-                  }
-                  hypre_BoxLoop2End(Ai, ti);
+					  hypre_BoxLoop2BeginSimd(hypre_StructVectorNDim(x), loop_size,
+										  A_data_box, start, stride, Ai,
+										  t_data_box, start, stride, ti);
+					  {
+						 tp[ti] /= Ap[Ai];
+					  }
+					  hypre_BoxLoop2EndSimd(Ai, ti);
 #undef DEVICE_VAR
+                  }
+                  else{
+#define DEVICE_VAR is_device_ptr(tp,Ap)
+					  hypre_BoxLoop2Begin(hypre_StructVectorNDim(x), loop_size,
+										  A_data_box, start, stride, Ai,
+										  t_data_box, start, stride, ti);
+					  {
+						 tp[ti] /= Ap[Ai];
+					  }
+					  hypre_BoxLoop2End(Ai, ti);
+#undef DEVICE_VAR
+                  }
                }
             }
          }
@@ -710,15 +738,27 @@ hypre_PointRelax_core0( void               *relax_vdata,
    start  = hypre_BoxIMin(compute_box);
    hypre_BoxGetStrideSize(compute_box, stride, loop_size);
 
+   if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(tp,bp)
-   hypre_BoxLoop2Begin(hypre_StructMatrixNDim(A), loop_size,
-                       b_data_box, start, stride, bi,
-                       t_data_box, start, stride, ti);
-   {
-      tp[ti] = bp[bi];
+	   hypre_BoxLoop2BeginSimd(hypre_StructMatrixNDim(A), loop_size,
+						   b_data_box, start, stride, bi,
+						   t_data_box, start, stride, ti);
+	   {
+		  tp[ti] = bp[bi];
+	   }
+	   hypre_BoxLoop2EndSimd(bi, ti);
    }
-   hypre_BoxLoop2End(bi, ti);
+   else{
+#define DEVICE_VAR is_device_ptr(tp,bp)
+	   hypre_BoxLoop2Begin(hypre_StructMatrixNDim(A), loop_size,
+						   b_data_box, start, stride, bi,
+						   t_data_box, start, stride, ti);
+	   {
+		  tp[ti] = bp[bi];
+	   }
+	   hypre_BoxLoop2End(bi, ti);
 #undef DEVICE_VAR
+   }
 
    /* unroll up to depth MAX_DEPTH */
    for (si = 0; si < stencil_size; si += MAX_DEPTH)
@@ -783,61 +823,121 @@ hypre_PointRelax_core0( void               *relax_vdata,
       switch(depth)
       {
          case 7:
+        	 if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(tp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,Ap6,xp)
-            hypre_BoxLoop3Begin(hypre_StructMatrixNDim(A), loop_size,
-                                A_data_box, start, stride, Ai,
-                                x_data_box, start, stride, xi,
-                                t_data_box, start, stride, ti);
-            {
-               tp[ti] -=
-                  Ap0[Ai] * xp[xi + xoff0] +
-                  Ap1[Ai] * xp[xi + xoff1] +
-                  Ap2[Ai] * xp[xi + xoff2] +
-                  Ap3[Ai] * xp[xi + xoff3] +
-                  Ap4[Ai] * xp[xi + xoff4] +
-                  Ap5[Ai] * xp[xi + xoff5] +
-                  Ap6[Ai] * xp[xi + xoff6];
-            }
-            hypre_BoxLoop3End(Ai, xi, ti);
+        		 hypre_BoxLoop3BeginSimd(hypre_StructMatrixNDim(A), loop_size,
+									A_data_box, start, stride, Ai,
+									x_data_box, start, stride, xi,
+									t_data_box, start, stride, ti);
+				{
+				   tp[ti] -=
+					  Ap0[Ai] * xp[xi + xoff0] +
+					  Ap1[Ai] * xp[xi + xoff1] +
+					  Ap2[Ai] * xp[xi + xoff2] +
+					  Ap3[Ai] * xp[xi + xoff3] +
+					  Ap4[Ai] * xp[xi + xoff4] +
+					  Ap5[Ai] * xp[xi + xoff5] +
+					  Ap6[Ai] * xp[xi + xoff6];
+				}
+				hypre_BoxLoop3EndSimd(Ai, xi, ti);
 #undef DEVICE_VAR
+        	 }
+        	 else{
+#define DEVICE_VAR is_device_ptr(tp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,Ap6,xp)
+                 hypre_BoxLoop3Begin(hypre_StructMatrixNDim(A), loop_size,
+                                     A_data_box, start, stride, Ai,
+                                     x_data_box, start, stride, xi,
+                                     t_data_box, start, stride, ti);
+                 {
+                    tp[ti] -=
+                       Ap0[Ai] * xp[xi + xoff0] +
+                       Ap1[Ai] * xp[xi + xoff1] +
+                       Ap2[Ai] * xp[xi + xoff2] +
+                       Ap3[Ai] * xp[xi + xoff3] +
+                       Ap4[Ai] * xp[xi + xoff4] +
+                       Ap5[Ai] * xp[xi + xoff5] +
+                       Ap6[Ai] * xp[xi + xoff6];
+                 }
+                 hypre_BoxLoop3End(Ai, xi, ti);
+#undef DEVICE_VAR
+        	 }
             break;
 
          case 6:
+        	 if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(tp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,xp)
-            hypre_BoxLoop3Begin(hypre_StructMatrixNDim(A), loop_size,
-                                A_data_box, start, stride, Ai,
-                                x_data_box, start, stride, xi,
-                                t_data_box, start, stride, ti);
-            {
-               tp[ti] -=
-                  Ap0[Ai] * xp[xi + xoff0] +
-                  Ap1[Ai] * xp[xi + xoff1] +
-                  Ap2[Ai] * xp[xi + xoff2] +
-                  Ap3[Ai] * xp[xi + xoff3] +
-                  Ap4[Ai] * xp[xi + xoff4] +
-                  Ap5[Ai] * xp[xi + xoff5];
-            }
-            hypre_BoxLoop3End(Ai, xi, ti);
+				hypre_BoxLoop3BeginSimd(hypre_StructMatrixNDim(A), loop_size,
+									A_data_box, start, stride, Ai,
+									x_data_box, start, stride, xi,
+									t_data_box, start, stride, ti);
+				{
+				   tp[ti] -=
+					  Ap0[Ai] * xp[xi + xoff0] +
+					  Ap1[Ai] * xp[xi + xoff1] +
+					  Ap2[Ai] * xp[xi + xoff2] +
+					  Ap3[Ai] * xp[xi + xoff3] +
+					  Ap4[Ai] * xp[xi + xoff4] +
+					  Ap5[Ai] * xp[xi + xoff5];
+				}
+				hypre_BoxLoop3EndSimd(Ai, xi, ti);
 #undef DEVICE_VAR
+        	 }
+        	 else{
+#define DEVICE_VAR is_device_ptr(tp,Ap0,Ap1,Ap2,Ap3,Ap4,Ap5,xp)
+				hypre_BoxLoop3Begin(hypre_StructMatrixNDim(A), loop_size,
+									A_data_box, start, stride, Ai,
+									x_data_box, start, stride, xi,
+									t_data_box, start, stride, ti);
+				{
+				   tp[ti] -=
+					  Ap0[Ai] * xp[xi + xoff0] +
+					  Ap1[Ai] * xp[xi + xoff1] +
+					  Ap2[Ai] * xp[xi + xoff2] +
+					  Ap3[Ai] * xp[xi + xoff3] +
+					  Ap4[Ai] * xp[xi + xoff4] +
+					  Ap5[Ai] * xp[xi + xoff5];
+				}
+				hypre_BoxLoop3End(Ai, xi, ti);
+#undef DEVICE_VAR
+        	 }
             break;
 
          case 5:
+        	 if(stride[0]==1){
 #define DEVICE_VAR is_device_ptr(tp,Ap0,Ap1,Ap2,Ap3,Ap4,xp)
-            hypre_BoxLoop3Begin(hypre_StructMatrixNDim(A), loop_size,
-                                A_data_box, start, stride, Ai,
-                                x_data_box, start, stride, xi,
-                                t_data_box, start, stride, ti);
-            {
-               tp[ti] -=
-                  Ap0[Ai] * xp[xi + xoff0] +
-                  Ap1[Ai] * xp[xi + xoff1] +
-                  Ap2[Ai] * xp[xi + xoff2] +
-                  Ap3[Ai] * xp[xi + xoff3] +
-                  Ap4[Ai] * xp[xi + xoff4];
-            }
-            hypre_BoxLoop3End(Ai, xi, ti);
+				hypre_BoxLoop3BeginSimd(hypre_StructMatrixNDim(A), loop_size,
+									A_data_box, start, stride, Ai,
+									x_data_box, start, stride, xi,
+									t_data_box, start, stride, ti);
+				{
+				   tp[ti] -=
+					  Ap0[Ai] * xp[xi + xoff0] +
+					  Ap1[Ai] * xp[xi + xoff1] +
+					  Ap2[Ai] * xp[xi + xoff2] +
+					  Ap3[Ai] * xp[xi + xoff3] +
+					  Ap4[Ai] * xp[xi + xoff4];
+				}
+				hypre_BoxLoop3EndSimd(Ai, xi, ti);
 #undef DEVICE_VAR
-            break;
+        	 }
+        	 else{
+#define DEVICE_VAR is_device_ptr(tp,Ap0,Ap1,Ap2,Ap3,Ap4,xp)
+				hypre_BoxLoop3Begin(hypre_StructMatrixNDim(A), loop_size,
+									A_data_box, start, stride, Ai,
+									x_data_box, start, stride, xi,
+									t_data_box, start, stride, ti);
+				{
+				   tp[ti] -=
+					  Ap0[Ai] * xp[xi + xoff0] +
+					  Ap1[Ai] * xp[xi + xoff1] +
+					  Ap2[Ai] * xp[xi + xoff2] +
+					  Ap3[Ai] * xp[xi + xoff3] +
+					  Ap4[Ai] * xp[xi + xoff4];
+				}
+				hypre_BoxLoop3End(Ai, xi, ti);
+#undef DEVICE_VAR
+        	 }
+             break;
 
          case 4:
 #define DEVICE_VAR is_device_ptr(tp,Ap0,Ap1,Ap2,Ap3,xp)
@@ -1497,15 +1597,28 @@ HYPRE_Int hypre_relax_wtx( void *relax_vdata, HYPRE_Int pointset,
             start  = hypre_BoxIMin(compute_box);
             hypre_BoxGetStrideSize(compute_box, stride, loop_size);
 
+            if(stride[0] == 1){
 #define DEVICE_VAR is_device_ptr(xp,tp)
-            hypre_BoxLoop2Begin(hypre_StructVectorNDim(x), loop_size,
-                                x_data_box, start, stride, xi,
-                                t_data_box, start, stride, ti);
-            {
-               xp[xi] = weight*tp[ti] + weightc*xp[xi];
-            }
-            hypre_BoxLoop2End(xi, ti);
+				hypre_BoxLoop2BeginSimd(hypre_StructVectorNDim(x), loop_size,
+									x_data_box, start, stride, xi,
+									t_data_box, start, stride, ti);
+				{
+				   xp[xi] = weight*tp[ti] + weightc*xp[xi];
+				}
+				hypre_BoxLoop2EndSimd(xi, ti);
 #undef DEVICE_VAR
+            }
+            else{
+#define DEVICE_VAR is_device_ptr(xp,tp)
+				hypre_BoxLoop2Begin(hypre_StructVectorNDim(x), loop_size,
+									x_data_box, start, stride, xi,
+									t_data_box, start, stride, ti);
+				{
+				   xp[xi] = weight*tp[ti] + weightc*xp[xi];
+				}
+				hypre_BoxLoop2End(xi, ti);
+#undef DEVICE_VAR
+            }
          }
       }
    }

@@ -60,6 +60,13 @@ typedef struct hypre_Boxloop_struct
 
 extern "C++" {
 
+
+#ifdef HYPRE_USING_MPI_EP
+extern cudaStream_t *g_streams;
+extern __thread int g_thread_id;
+#endif 
+
+
 template <typename LOOP_BODY>
 __global__ void forall_kernel(LOOP_BODY loop_body, HYPRE_Int length)
 {
@@ -90,7 +97,11 @@ void BoxLoopforall(HYPRE_Int policy, HYPRE_Int length, LOOP_BODY loop_body)
       {
          gridSize = 1;
       }
+#ifdef HYPRE_USING_MPI_EP
+      forall_kernel<<<gridSize, BLOCKSIZE, 0, g_streams[g_thread_id]>>>(loop_body, length);
+#else
       forall_kernel<<<gridSize, BLOCKSIZE>>>(loop_body, length);
+#endif
    }
    else if (policy == 2)
    {
@@ -125,7 +136,11 @@ void ReductionBoxLoopforall(HYPRE_Int policy, HYPRE_Int length, LOOP_BODY Reduct
       hypre_printf("length= %d, blocksize = %d, gridsize = %d\n",
                    length, BLOCKSIZE, gridSize);
       */
+#ifdef HYPRE_USING_MPI_EP
+      reductionforall_kernel<<<gridSize, BLOCKSIZE, 0, g_streams[g_thread_id]>>>(ReductionLoop, length);
+#else
       reductionforall_kernel<<<gridSize, BLOCKSIZE>>>(ReductionLoop, length);
+#endif      
    }
 }
 
