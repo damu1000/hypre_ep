@@ -22,7 +22,8 @@ xthreads * ythreads * zthreads will override OMP_NUM_THREADS
 To get simple hardcoded mapping similar to the one used in hypre_cpu.cc, set xthreads=#threads, ythreads=1 and zthreads=1
 
 int verify: 0 or 1: verify answers if set to 1. Default 0 
-
+int timesteps: number of timesteps to run for
+int output_interval: timestep interval at which output timing is displayed
 
 -->
 
@@ -33,12 +34,13 @@ int verify: 0 or 1: verify answers if set to 1. Default 0
 <ypatches>2</ypatches>
 <zpatches>2</zpatches>
 
-<xthreads>2</xthreads>
+<xthreads>4</xthreads>
 <ythreads>2</ythreads>
-<zthreads>2</zthreads>
+<zthreads>1</zthreads>
+<team_size>4</team_size>
 
-<verify>0</verify>
-<timesteps>10</timesteps>
+<verify>1</verify>
+<timesteps>5</timesteps>
 <output_interval>1</output_interval>
 
 </input>

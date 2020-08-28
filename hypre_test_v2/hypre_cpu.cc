@@ -16,6 +16,9 @@ export KOKKOS_PATH=/home/damodars/uintah_kokkos_dev/kokkos/kokkos_openmp/build
 mpicxx hypre_cpu.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
 
 CC hypre_cpu.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu -dynamic
+
+mpicxx hypre_cpu.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/damodars/hypre_ep/hypre_cpu/src/build/include/ -I/home/sci/damodars/installs/libxml2-2.9.7/build/include/libxml2/ -L/home/sci/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE  -L/home/sci/damodars/installs/libxml2-2.9.7/build/lib/ -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
+
  */
 
 #include<chrono>
@@ -91,8 +94,9 @@ void set_affinity( const int proc_unit )
 
 int main(int argc, char **argv)
 {
-	int cpu_affinity = get_affinity();
+
 	int device_id=-1;
+
 	/*cudaGetDevice(&device_id);
 	cudaDeviceProp deviceProp;
 	cudaGetDeviceProperties(&deviceProp, device_id);
@@ -109,6 +113,9 @@ int main(int argc, char **argv)
 		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 		MPI_Comm_size(MPI_COMM_WORLD, &size);
 		set_affinity(rank);
+		int cpu_affinity = get_affinity();
+
+		printf("rank %d cpu %d\n",rank, cpu_affinity);
 
 		if(argc != 3){
 			printf("Enter arguments id_string and input file name. exiting\n");

@@ -16,7 +16,6 @@ mkdir build
 ./configure --prefix=`pwd`/build CC=mpicxx CXX=mpicxx F77=mpif77 CFLAGS="-fPIC -O3 -g" CXXFLAGS="-fPIC -O3 -g"
 
 Configure on with intel compiler on AVX512 supported architectures: Add "-fp-model precise -xMIC-AVX512" to CFLAGS and CXXFLAGS.
-Enable vectorization of few key kernels (which is not done by default): Add "-DUSE_SIMD" to CFLAGS and CXXFLAGS. Do this as the last optimization while checking incremental performance of different optimizations.
 
 make -j32 install
 
@@ -50,11 +49,31 @@ mpicxx hypre_cpu_ep.cc -std=c++11 -I<...>/hypre_ep/src/build/include/ -I<...>/hy
 
 Run similar to 1_cpu, except now there will some threads instead of ranks. There could be different combinations of #threads and #ranks. Ensure that the number of patches is divisible by (#ranks*#threads) e.g. Following lines will spawn 4 mpi ranks with 4 threads per rank. Each thread (or EP) will get one patch:
 
-export OMP_NUM_THREADS=4
+export OMP_PROC_BIND=spread,spread
+export OMP_PLACES=threads
+export OMP_STACKSIZE=1G
+export OMP_NESTED=true
   
 mpirun -np 4 ./2_ep ep_run input.xml
 
 To compare the accuracy of ep: Uncomment calls to functions write_to_file and verifyX in files hypre_cpu.cc and hypre_cpu_ep.cc respectively. Create a folder "output" in hypre_test_v2 and run 1_cpu and 2_ep using same number of patches and same number of ranks/EndPoints. 1_cpu will write results into files and 2_ep will compare its own results with those dumped in the file.
 
 3. hypre_gpu.cc: To be used for hypre ep cuda code. Kokkos needed. In progress.
+
+
+### Optimization switches:
+Enable/disable following optimizations.
+
+- Inter-thread comm: Exchanges data among threads (EPs) of the same rank without using MPI. Enable/disable with macro USE_INTER_THREAD_COMM in /src/utilities/hypre_mpi_ep_helper.h
+
+- Multiple MPI comms: Use multiple MPI communicators to avoid waiting for locks within MPI and also exploite network parallelism in MPI 3.1. Uses a unique communicator in each direction. Enable/disable with macro USE_INTER_THREAD_COMM in /src/utilities/hypre_mpi_ep_helper.h
+
+- Odd-even comms: Uses odd-even assignment of MPI communicator (similar to Rohit Zambre's work).  Enable/disable with macro USE_ODD_EVEN_COMMS in /src/utilities/hypre_mpi_ep_helper.h
+
+- Efficient patch assignment: Inter-rank communication can be reduced by using block-wise patch assignment in 3 dimensions rather than assigning patches linearly. xthreads, ythreads, zthreads parameters in the input file can be used to do so.
+
+- Adaptive hierarchical parallelism: The main problem with out-of-box OpenMP implementation of parallelizing data parallel loops using OpenMP is not having enough work to justify OpenMP threads synchronization. The multi-grid algorithm in Hypre goes on coarsening the mesh. As a result, the number of cells reduce at every multi-grid level and OpenMP synchronization dominates than the actual computations at coarser levels. Yet such data parallel loops can be benifitial at scale because they can reduce number of ranks (or number of EPs) and reduce global reduction costs (MPI_allreduce), provided OpenMP synchronization overheads are reduced. (Global reduction takes up-to 30% of execution time on 512 nodes of Theta.) The new mechanism uses two level OpenMP parallelism. Each EP now spawns its own worker threads (thus each EP is a team of threads now rather than a single thread), but "adaptive" nature uses OpenMP pragma only if number of loop iterations are more than the value set in environment variable "HYPRE_MIN_WORKLOAD". Uses parameter "team_size" in input.xml to set number of worker threads. The downside is CPU cores remain unused when the number of cells are less than HYPRE_MIN_WORKLOAD. Enable by adding "--with-openmp" in configure line of hypre_ep. Can be disabled at runtime my setting very high value for HYPRE_MIN_WORKLOAD or by setting team_size in inputs.xml to 1. Need to find a sweet spot with number of EPs per rank and team_size so as to keep the cost of global reductions and local openmp synchronization overheads minimal.
+
+- Vectorization: Enable vectorization of few key kernels (which is not done by default): Add "-DUSE_SIMD" to CFLAGS and CXXFLAGS. Do this as the last optimization while checking incremental performance of different optimizations. Depending on problem size and communication pattern vectorization can give upto 20% speed-up on KNL. (Of corse the same can be done on CPU only version also)
+
 

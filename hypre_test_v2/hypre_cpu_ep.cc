@@ -21,6 +21,10 @@ mpicxx 2_hypre_gpu.cc -std=c++11 -I/home/damodars/uintah_kokkos_dev/hypre_kokkos
  mpicxx hypre_cpu_ep.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src/ -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2  -g -O3 -o 2_ep -fopenmp
 
 CC hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -lxml2 -g -O3 -fopenmp -ldl -o 2_ep -dynamic
+
+mpicxx hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/damodars/hypre_ep/hypre_ep/src -I/home/sci/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/sci/damodars/installs/libxml2-2.9.7/build/include/libxml2/ -L/home/sci/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE  -L/home/sci/damodars/installs/libxml2-2.9.7/build/lib/ -lxml2 -g -O3 -fopenmp -ldl -o 2_ep
+
+
  */
 
 //#include <cuda_profiler_api.h>
@@ -241,7 +245,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	int rank, size;
 	hypre_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	hypre_MPI_Comm_size(MPI_COMM_WORLD, &size);
-	set_affinity(rank);
+//	set_affinity(rank);
 
 	if(number_of_patches % size != 0){
 		printf("Ensure total number of patches (patches cube) is divisible number of ranks at %s:%d. exiting\n", __FILE__, __LINE__);
@@ -448,6 +452,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 		if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
 		{
 			std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << " at " <<  __FILE__  << ":" << __LINE__ << "\n";
+			fflush(stdout);
 			exit(1);
 		}
 
@@ -545,8 +550,15 @@ int main(int argc1, char **argv1)
 		//cudaProfilerStart();
 #pragma omp parallel
 		{
-			/*int cpu_affinity = get_affinity();
-			int device_id=-1;
+			omp_set_num_threads(input.team_size); //second level of parallelism
+			int teamid = omp_get_thread_num();
+#pragma omp parallel
+			{
+				int threadid = omp_get_thread_num();
+				int cpu_affinity = get_affinity();
+//				printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
+			}
+			/*int device_id=-1;
 			cudaGetDevice(&device_id);
 			cudaDeviceProp deviceProp;
 			cudaGetDeviceProperties(&deviceProp, device_id);

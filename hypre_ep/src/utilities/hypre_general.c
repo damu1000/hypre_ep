@@ -21,10 +21,20 @@
  * hypre initialization
  *
  *****************************************************************************/
+int hypre_min_workload=0;
 
 void
 HYPRE_Init( hypre_int argc, char *argv[] )
 {
+#ifdef HYPRE_USING_OPENMP
+	const char * hypre_min_workload_str = getenv("HYPRE_MIN_WORKLOAD");
+	if(hypre_min_workload_str){
+		hypre_min_workload = atoi(hypre_min_workload_str);
+	}
+	else
+		hypre_min_workload = 10 * omp_get_max_threads();
+#endif
+
 #ifdef HYPRE_USING_MPI_EP
 	hypre_init_thread();	
 #endif
