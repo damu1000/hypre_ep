@@ -8,8 +8,9 @@
 #include <atomic>
 
 #define USE_INTER_THREAD_COMM
-#define USE_MULTIPLE_COMMS
-#define USE_ODD_EVEN_COMMS
+#define USE_TAG_PAR_COMM /* either TAG_PAR_COMM or MULTIPLE_COMMS but not both */
+//#define USE_MULTIPLE_COMMS
+//#define USE_ODD_EVEN_COMMS
 
 /************************************************************************************************************************************
 
@@ -134,6 +135,10 @@ Multiple comms for EP
 ************************************************************************************************************************************/
 
 
+#ifdef USE_TAG_PAR_COMM
+MPI_Comm tag_par_comm;
+#endif
+
 #ifdef USE_MULTIPLE_COMMS
 #include <unordered_map>
 #include <vector>
@@ -188,7 +193,11 @@ void createCommMap(int *ep_superpatch, int *super_dims, int *rank_dims, int xthr
 
 inline MPI_Comm getComm(int src, int dest)
 {
+#ifdef USE_TAG_PAR_COMM
+        MPI_Comm comm = tag_par_comm;
+#else
 	MPI_Comm comm = MPI_COMM_WORLD;
+#endif
 
 #ifdef USE_MULTIPLE_COMMS
 	int dest_thread = dest % g_num_of_threads;
@@ -508,6 +517,24 @@ void hypre_set_num_threads(int n, int (*f)())	//call from master thread BEFORE w
 	g_comm_map.resize(g_num_of_threads);
 #endif //#ifdef USE_MULTIPLE_COMMS
 
+#ifdef USE_TAG_PAR_COMM
+        MPI_Info info;
+        char *num_vcis;
+
+        MPI_Info_create(&info);
+        
+        MPI_Info_set(info, "mpi_assert_new_vci", "true"); // allocate new VCIs to this communicator
+        num_vcis = (char*) malloc((snprintf(NULL, 0, "%d", g_num_of_threads)) + 1);
+        sprintf(num_vcis, "%d", g_num_of_threads);
+        MPI_Info_set(info, "mpi_num_vcis", num_vcis); // number of VCIs to allocate to this communicator
+        MPI_Info_set(info, "mpi_assert_tag_based_parallelism", "true"); // tag-based parallelism possible
+        MPI_Info_set(info, "mpi_num_tag_bits_for_vci", "5"); // number of bits in the MPI tag to use for VCI selection TODO: generalize to input from HYPRE_TAG
+        MPI_Info_set(info, "mpi_num_tag_bits_for_app", "12"); // number of bits in the MPI tag for the app TODO: generalize to input from HYPRE_TAG
+
+        MPI_Comm_dup_with_info(MPI_COMM_WORLD, info, &tag_par_comm);
+        
+        MPI_Info_free(&info);
+#endif //#ifdef USE_TAG_PAR_COMM
 
 	g_send_buff = new void* [g_num_of_threads*g_num_of_threads];
 	g_recv_buff = new void* [g_num_of_threads*g_num_of_threads];
@@ -591,6 +618,9 @@ void hypre_destroy_thread()	//ideally should be called after every call to multi
 		MPI_Comm_free( &g_comm_pool[i] );
 	delete []g_comm_pool;
 #endif //#ifdef USE_MULTIPLE_COMMS
+#ifdef USE_TAG_PAR_COMM
+        MPI_Comm_free(&tag_par_comm);
+#endif //#ifdef USE_TAG_PAR_COMM
 	delete []g_send_buff;
 	delete []g_recv_buff;
 	delete []g_size_buff;
