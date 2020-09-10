@@ -8,9 +8,13 @@
 #include <atomic>
 
 #define USE_INTER_THREAD_COMM
-#define USE_TAG_PAR_COMM /* either TAG_PAR_COMM or MULTIPLE_COMMS but not both */
-//#define USE_MULTIPLE_COMMS
-//#define USE_ODD_EVEN_COMMS
+#define USE_MULTIPLE_COMMS
+#define USE_ODD_EVEN_COMMS
+//#define USE_TAG_PAR_COMM /* either TAG_PAR_COMM or MULTIPLE_COMMS but not both */
+
+#if defined(USE_TAG_PAR_COMM) && defined(USE_MULTIPLE_COMMS)
+#error "Define either USE_MULTIPLE_COMMS or USE_TAG_PAR_COMM, but not both."
+#endif
 
 /************************************************************************************************************************************
 

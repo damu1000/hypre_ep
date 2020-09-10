@@ -930,9 +930,21 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
    /*--------------------------------------------------------------------
     * pack send buffers
     *--------------------------------------------------------------------*/
-
-   for (i = 0; i < num_sends; i++)
+#ifdef HYPRE_USING_OPENMP
+   extern int hypre_min_workload;
+   int min_workload = hypre_min_workload;
+   hypre_min_workload = 0x7fffffff; //set large value to disable parallelization within loop macros
+#pragma omp parallel for
+#endif
+   for (int i = 0; i < num_sends; i++)
    {
+	  hypre_CommType      *comm_type;
+	  hypre_CommEntryType *comm_entry;
+	  HYPRE_Int num_entries;
+	  HYPRE_Complex       *dptr, *kptr, *lptr;
+      HYPRE_Int           *qptr, *length_array, *stride_array, unitst_array[HYPRE_MAXDIM+1], *order;
+	  HYPRE_Int            j, d, ll, size;
+
       comm_type = hypre_CommPkgSendType(comm_pkg, i);
       num_entries = hypre_CommTypeNumEntries(comm_type);
 
@@ -988,6 +1000,9 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
          }
       }
    }
+#ifdef HYPRE_USING_OPENMP
+   hypre_min_workload = min_workload; //reset to original value
+#endif
 
    /* Copy buffer data from Device to Host */
    if (num_sends > 0 && alloc_dev_buffer)
@@ -1258,8 +1273,21 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
                      HYPRE_MEMORY_DEVICE, HYPRE_MEMORY_HOST );
    }
 
-   for (i = 0; i < num_recvs; i++)
+#ifdef HYPRE_USING_OPENMP
+   extern int hypre_min_workload;
+   int min_workload = hypre_min_workload;
+   hypre_min_workload = 0x7fffffff; //set large value to disable parallelization within loop macros
+#pragma omp parallel for
+#endif
+   for (int i = 0; i < num_recvs; i++)
    {
+	  hypre_CommType      *comm_type;
+	  hypre_CommEntryType *comm_entry;
+	  HYPRE_Int num_entries;
+	  HYPRE_Complex       *dptr, *kptr, *lptr;
+      HYPRE_Int           *qptr, *length_array, *stride_array, unitst_array[HYPRE_MAXDIM+1];
+	  HYPRE_Int            j, d, ll;
+
       comm_type = hypre_CommPkgRecvType(comm_pkg, i);
       num_entries = hypre_CommTypeNumEntries(comm_type);
 
@@ -1287,28 +1315,40 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
          {
             kptr = lptr + ll*stride_array[ndim];
 
-#define DEVICE_VAR is_device_ptr(kptr,dptr)
-            hypre_BasicBoxLoop2Begin(ndim, length_array,
-                                     stride_array, ki,
-                                     unitst_array, di);
+            if (action > 0)
             {
-               if (action > 0)
+#define DEVICE_VAR is_device_ptr(kptr,dptr)
+               hypre_BasicBoxLoop2Begin(ndim, length_array,
+                                        stride_array, ki,
+                                        unitst_array, di);
                {
                   kptr[ki] += dptr[di];
                }
-               else
+               hypre_BoxLoop2End(ki, di);
+#undef DEVICE_VAR
+
+            }
+            else
+            {
+#define DEVICE_VAR is_device_ptr(kptr,dptr)
+               hypre_BasicBoxLoop2Begin(ndim, length_array,
+                                        stride_array, ki,
+                                        unitst_array, di);
                {
                   kptr[ki] = dptr[di];
                }
+               hypre_BoxLoop2End(ki, di);
+   #undef DEVICE_VAR
+
             }
-            hypre_BoxLoop2End(ki, di);
-#undef DEVICE_VAR
 
             dptr += unitst_array[ndim];
          }
       }
    }
-
+#ifdef HYPRE_USING_OPENMP
+   hypre_min_workload = min_workload; //reset to original value
+#endif
    /*--------------------------------------------------------------------
     * turn off first communication indicator
     *--------------------------------------------------------------------*/
@@ -1389,52 +1429,69 @@ hypre_ExchangeLocalData( hypre_CommPkg *comm_pkg,
    copy_fr_type = hypre_CommPkgCopyFromType(comm_pkg);
    copy_to_type = hypre_CommPkgCopyToType(comm_pkg);
 
-   for (i = 0; i < hypre_CommTypeNumEntries(copy_fr_type); i++)
+#ifdef HYPRE_USING_OPENMP
+   extern int hypre_min_workload;
+   int min_workload = hypre_min_workload;
+   hypre_min_workload = 0x7fffffff; //set large value to disable parallelization within loop macros
+#pragma omp parallel for
+#endif
+   for (int i = 0; i < hypre_CommTypeNumEntries(copy_fr_type); i++)
    {
-      copy_fr_entry = hypre_CommTypeEntry(copy_fr_type, i);
-      copy_to_entry = hypre_CommTypeEntry(copy_to_type, i);
+	  hypre_CommEntryType *copy_fr_entry = hypre_CommTypeEntry(copy_fr_type, i);
+	  hypre_CommEntryType *copy_to_entry = hypre_CommTypeEntry(copy_to_type, i);
 
-      fr_dp = send_data + hypre_CommEntryTypeOffset(copy_fr_entry);
-      to_dp = recv_data + hypre_CommEntryTypeOffset(copy_to_entry);
+	  HYPRE_Complex *fr_dp = send_data + hypre_CommEntryTypeOffset(copy_fr_entry);
+	  HYPRE_Complex *to_dp = recv_data + hypre_CommEntryTypeOffset(copy_to_entry);
 
       /* copy data only when necessary */
       if (to_dp != fr_dp)
       {
-         length_array = hypre_CommEntryTypeLengthArray(copy_fr_entry);
+    	 HYPRE_Int *length_array = hypre_CommEntryTypeLengthArray(copy_fr_entry);
 
-         fr_stride_array = hypre_CommEntryTypeStrideArray(copy_fr_entry);
-         to_stride_array = hypre_CommEntryTypeStrideArray(copy_to_entry);
-         order = hypre_CommEntryTypeOrder(copy_fr_entry);
+    	 HYPRE_Int *fr_stride_array = hypre_CommEntryTypeStrideArray(copy_fr_entry);
+    	 HYPRE_Int *to_stride_array = hypre_CommEntryTypeStrideArray(copy_to_entry);
+    	 HYPRE_Int *order = hypre_CommEntryTypeOrder(copy_fr_entry);
 
-         for (ll = 0; ll < num_values; ll++)
+         for (HYPRE_Int ll = 0; ll < num_values; ll++)
          {
             if (order[ll] > -1)
             {
-               fr_dpl = fr_dp + (order[ll])*fr_stride_array[ndim];
-               to_dpl = to_dp + (      ll )*to_stride_array[ndim];
+               HYPRE_Complex *fr_dpl = fr_dp + (order[ll])*fr_stride_array[ndim];
+               HYPRE_Complex *to_dpl = to_dp + (      ll )*to_stride_array[ndim];
 
-#define DEVICE_VAR is_device_ptr(to_dpl,fr_dpl)
-               hypre_BasicBoxLoop2Begin(ndim, length_array,
-                                        fr_stride_array, fi,
-                                        to_stride_array, ti);
+               if (action > 0)
                {
-                  if (action > 0)
+#define DEVICE_VAR is_device_ptr(to_dpl,fr_dpl)
+                 hypre_BasicBoxLoop2Begin(ndim, length_array,
+                                          fr_stride_array, fi,
+                                          to_stride_array, ti);
                   {
                      /* add the data to existing values in memory */
                      to_dpl[ti] += fr_dpl[fi];
                   }
-                  else
+               hypre_BoxLoop2End(fi, ti);
+#undef DEVICE_VAR
+               }
+               else
+               {
+#define DEVICE_VAR is_device_ptr(to_dpl,fr_dpl)
+                  hypre_BasicBoxLoop2Begin(ndim, length_array,
+                                           fr_stride_array, fi,
+                                           to_stride_array, ti);
                   {
                      /* copy the data over existing values in memory */
                      to_dpl[ti] = fr_dpl[fi];
                   }
-               }
-               hypre_BoxLoop2End(fi, ti);
+                  hypre_BoxLoop2End(fi, ti);
 #undef DEVICE_VAR
+               }
             }
          }
       }
    }
+#ifdef HYPRE_USING_OPENMP
+   hypre_min_workload = min_workload; //reset to original value
+#endif
 
    return hypre_error_flag;
 }

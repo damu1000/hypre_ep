@@ -32,7 +32,7 @@ HYPRE_Init( hypre_int argc, char *argv[] )
 		hypre_min_workload = atoi(hypre_min_workload_str);
 	}
 	else
-		hypre_min_workload = 10 * omp_get_max_threads();
+		hypre_min_workload = 100 * omp_get_max_threads();
 #endif
 
 #ifdef HYPRE_USING_MPI_EP
