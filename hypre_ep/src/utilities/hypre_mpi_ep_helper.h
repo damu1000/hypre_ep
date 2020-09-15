@@ -8,12 +8,18 @@
 #include <atomic>
 
 #define USE_INTER_THREAD_COMM
+#define USE_FUNNELLED_COMM
+/*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 #define USE_MULTIPLE_COMMS
 #define USE_ODD_EVEN_COMMS
 //#define USE_TAG_PAR_COMM /* either TAG_PAR_COMM or MULTIPLE_COMMS but not both */
 
 #if defined(USE_TAG_PAR_COMM) && defined(USE_MULTIPLE_COMMS)
 #error "Define either USE_MULTIPLE_COMMS or USE_TAG_PAR_COMM, but not both."
+#endif
+
+#if defined(USE_TAG_PAR_COMM) && defined(USE_MULTIPLE_COMMS)
+#error "Define either USE_FUNNELLED_COMM or USE_TAG_PAR_COMM, but not both."
 #endif
 
 /************************************************************************************************************************************
@@ -552,6 +558,9 @@ void hypre_set_num_threads(int n, int (*f)())	//call from master thread BEFORE w
 
 }
 
+#ifdef USE_FUNNELLED_COMM
+extern void funnelled_comm();
+#endif
 
 void hypre_init_thread()	//to be called by every thread
 {
@@ -562,6 +571,12 @@ void hypre_init_thread()	//to be called by every thread
   //printf("hypre_init_thread - rank: %d, thread: %d\n", g_rank, g_thread_id);
 	tl_prevMessageCount = 0;
 	tl_prevtag = -1;
+
+#ifdef USE_FUNNELLED_COMM
+	if(g_thread_id==g_num_of_threads)//use last thread as comm thread
+		funnelled_comm();
+#endif
+
 }
 
 void hypre_destroy_thread()	//ideally should be called after every call to multithreaded Hypre solve to avoid any memory leaks. //call from master thread AFTER workers are joined
@@ -629,6 +644,10 @@ void hypre_destroy_thread()	//ideally should be called after every call to multi
 	delete []g_recv_buff;
 	delete []g_size_buff;
 
+#ifdef USE_FUNNELLED_COMM
+	extern volatile int g_funneled_comm_spin;
+	g_funneled_comm_spin=0;
+#endif
 	}
 
 }

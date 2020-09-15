@@ -53,6 +53,8 @@ mpicxx hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/dam
 #include <unistd.h>
 #include "io.h"
 
+#define USE_FUNNELLED_COMM
+/*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 
 //typedef Kokkos::Serial KernelSpace;
 //typedef Kokkos::Cuda KernelSpace;
@@ -238,9 +240,13 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	//--------------------------------------------------------- init ----------------------------------------------------------------------------------------------
 
 	int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
+	int num_of_threads = input.xthreads * input.ythreads * input.zthreads;
 
 	
 	HYPRE_Init(argc, argv);
+
+	if(omp_get_thread_num()==num_of_threads) //this is comm thread so dont call hypre, just return
+		return;
 
 	int rank, size;
 	hypre_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -289,10 +295,11 @@ void hypre_solve(const char * exp_type, xmlInput input)
 
 	//ViewDouble X("X", x_dim * y_dim * z_dim), B("B", x_dim * y_dim * z_dim);
 	//ViewStencil4 A("A", x_dim * y_dim * z_dim);
-	Stencil4 A[x_dim * y_dim * z_dim * patches_per_rank];
-	double X[x_dim * y_dim * z_dim * patches_per_rank], B[x_dim * y_dim * z_dim * patches_per_rank];
+	Stencil4 *A = new Stencil4[x_dim * y_dim * z_dim * patches_per_rank];
+	double *X = new double[x_dim * y_dim * z_dim * patches_per_rank];
+	double *B = new double[x_dim * y_dim * z_dim * patches_per_rank];
 
-//	Kokkos::parallel_for(Kokkos::RangePolicy<KernelSpace>(0, x_dim * y_dim * z_dim), KOKKOS_LAMBDA(int i){
+	//	Kokkos::parallel_for(Kokkos::RangePolicy<KernelSpace>(0, x_dim * y_dim * z_dim), KOKKOS_LAMBDA(int i){
 	for(int i=0; i<x_dim * y_dim * z_dim * patches_per_rank; i++){
 			A[i].p = 6; A[i].n=-1; A[i].e=-1; A[i].t=-1;
 			B[i] = 1;
@@ -502,6 +509,10 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	HYPRE_StructGridDestroy(grid);
 	hypre_EndTiming (tHypreAll_);
 
+	delete []A;
+	delete []X;
+	delete []B;
+
 	fflush(stdout);
 	HYPRE_Finalize();
 }	//end of hypre_solve
@@ -534,19 +545,24 @@ int main(int argc1, char **argv1)
 		MPI_Comm_size(MPI_COMM_WORLD, &size);
 
 		xmlInput input = parseInput(argv[2], rank);
+		int num_of_threads = input.xthreads * input.ythreads * input.zthreads;
 
 		if(input.xthreads>0 && input.ythreads>0 && input.zthreads>0){	//override #threads
-			omp_set_num_threads(input.xthreads*input.ythreads*input.zthreads);
- 		    if(rank ==0) printf("number of threads %d, %d, %d\n", input.xthreads, input.ythreads, input.zthreads);
+
+#ifdef USE_FUNNELLED_COMM
+			omp_set_num_threads(num_of_threads+1);
+#else
+			omp_set_num_threads(num_of_threads);
+#endif
+
+			if(rank ==0) printf("number of threads %d, %d, %d\n", input.xthreads, input.ythreads, input.zthreads);
 		}
 
-		int threads = omp_get_max_threads();
+		if(rank ==0) printf("Number of threads %d\n", num_of_threads);
 
-		if(rank ==0) printf("Number of threads %d\n", threads);
+		assignPatchToEP(input, rank, size, num_of_threads); //assuming EP.
 
-		assignPatchToEP(input, rank, size, threads); //assuming EP.
-
-		hypre_set_num_threads(threads, omp_get_thread_num);
+		hypre_set_num_threads(num_of_threads, omp_get_thread_num);
 		//cudaProfilerStart();
 #pragma omp parallel
 		{
