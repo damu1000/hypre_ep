@@ -53,7 +53,7 @@ mpicxx hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/dam
 #include <unistd.h>
 #include "io.h"
 
-#define USE_FUNNELLED_COMM
+//#define USE_FUNNELLED_COMM
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 
 //typedef Kokkos::Serial KernelSpace;
