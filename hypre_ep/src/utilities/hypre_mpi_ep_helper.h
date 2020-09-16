@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <atomic>
 
-#define USE_INTER_THREAD_COMM
+//#define USE_INTER_THREAD_COMM
 //#define USE_FUNNELLED_COMM
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 #define USE_MULTIPLE_COMMS
@@ -455,6 +455,11 @@ Setup part for hypre EP. Should be at the end to know all the data types
 ************************************************************************************************************************************/
 
 
+#ifdef USE_FUNNELLED_COMM
+extern void allocate_funneled_comm();
+extern void funnelled_comm();
+#endif
+
 
 int (*hypre_get_thread_id)();		//function pointer to store function which will return thread id. C does not allow thread local storage. Hence pass a function
 							//to return thread id - could be custom written function or could be library call such as omp_get_thread_num
@@ -556,11 +561,13 @@ void hypre_set_num_threads(int n, int (*f)())	//call from master thread BEFORE w
 		g_size_buff[i] = 0;
 	}
 
-}
 
 #ifdef USE_FUNNELLED_COMM
-extern void funnelled_comm();
+	allocate_funneled_comm();
 #endif
+
+
+}
 
 void hypre_init_thread()	//to be called by every thread
 {

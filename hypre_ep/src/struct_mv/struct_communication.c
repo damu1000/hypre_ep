@@ -24,116 +24,9 @@ FILE      *file;
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 
 #ifdef USE_FUNNELLED_COMM
-
-#include <vector>
-#include <atomic>
-
-struct MPIInfo{
-	void *buf;
-	int count, rank, tag;
-
-	MPIInfo(void *b, int c, int r, int t) :
-		buf(b), count(c), rank(r), tag(t) {}
-};
-
-HYPRE_THREAD_LOCAL_EP std::vector<MPIInfo> tl_mpi_info;
-
-//make the elements volatile or atomic if needed
-struct funnelledComm{
-	int num_sends, num_recvs;
-	int status;	//0: submitted to comm thread, 1: MPI posted, 2: MPI completed
-	MPI_Comm comm;
-	struct MPIInfo *mpi_info;
-	MPI_Request *mpi_request;
-	MPI_Status *mpi_status;
-};
-
-volatile struct funnelledComm * g_fun_comm;
-
-volatile int g_funneled_comm_spin=1;
-
-//void eh( MPI_Comm *comm, int *err, ... )
-//{
-//    printf( "############# Unexpected error code ############# \n" );fflush(stdout);
-//    return;
-//}
-
-void funnelled_comm()
-{
-//	MPI_Errhandler newerr;
-//	MPI_Comm_create_errhandler( eh, &newerr );
-//	MPI_Comm_set_errhandler( MPI_COMM_WORLD, newerr );
-
-	extern volatile int g_num_of_threads;	//total number of threads.
-	extern __thread int g_real_rank, g_thread_id;
-
-	//allocate buffers
-	g_funneled_comm_spin = 1;
-
-	g_fun_comm = new volatile funnelledComm[g_num_of_threads];	//allocate volatile if needed
-	for(int t=0; t<g_num_of_threads; t++){
-		g_fun_comm[t].status=2;
-		g_fun_comm[t].mpi_request=NULL;
-	}
-
-	while(g_funneled_comm_spin)
-	{
-		int t=0;
-		for(t=0; t<g_num_of_threads; t++)
-		{
-			if(g_fun_comm[t].status==0 && g_fun_comm[t].mpi_info &&
-			   g_fun_comm[t].mpi_request && g_fun_comm[t].mpi_status
-			   && g_fun_comm[t].num_sends != -1 && g_fun_comm[t].num_recvs != -1)//new request
-			{
-				int i=0;
-				g_thread_id = t;	//this is comm thread and needs to emulate calling thread. So replace it's g_thread_id with calling thread's id
-				MPI_Comm comm = g_fun_comm[t].comm;
-				struct MPIInfo *mpi_info = g_fun_comm[t].mpi_info;
-
-				for(i = 0; i < g_fun_comm[t].num_recvs; i++){
-					hypre_MPI_Irecv(mpi_info[i].buf,
-							mpi_info[i].count,
-							hypre_MPI_BYTE, mpi_info[i].rank,
-							mpi_info[i].tag, comm, &(g_fun_comm[t].mpi_request[i]));
-				}
-
-				int num_comms = g_fun_comm[t].num_recvs + g_fun_comm[t].num_sends;
-				for(; i < num_comms; i++){
-					hypre_MPI_Isend(mpi_info[i].buf,
-							mpi_info[i].count,
-							hypre_MPI_BYTE, mpi_info[i].rank,
-							mpi_info[i].tag, comm, &(g_fun_comm[t].mpi_request[i]));
-				}
-
-				if(num_comms>0)
-					g_fun_comm[t].status=1;	//wait if mpi posted
-				else
-					g_fun_comm[t].status=2; //mark completed if no requests
-			}
-		}
-
-
-		//while there are no new requests, call mpi test to progress requests.
-		for(t=0; t<g_num_of_threads; t++){
-			int num_comms = g_fun_comm[t].num_recvs + g_fun_comm[t].num_sends;
-			if(g_fun_comm[t].status==1 && num_comms > 0){	//request posted and status buffer is allocated
-				g_thread_id = t;
-				int flag=0;
-				if(MPI_Testall(num_comms, g_fun_comm[t].mpi_request, &flag, g_fun_comm[t].mpi_status) != MPI_SUCCESS)
-					printf("error in MPI_Testall\n");
-
-				if(flag){
-					g_fun_comm[t].status = 2; //completed
-				}
-			}
-		}
-	}
-
-	delete[] g_fun_comm;
-}
-
+#include<atomic>
+#include<omp.h>
 #endif
-
 
 /* These are device buffers needed to do MPI communication 
  * when the computations (BoxLoop) are excuted on device and the host memory
@@ -880,6 +773,186 @@ hypre_CommTypeSetEntry( hypre_Box           *box,
    return hypre_error_flag;
 }
 
+
+
+
+
+#ifdef USE_FUNNELLED_COMM
+
+//to be used for funneling the requests through main thread during thread as rank approach.
+// declared and allocated in hypre_set_num_threads in /src/utilities/mpistubs.c
+typedef struct hypre_CommSendRecvReq
+{
+	volatile HYPRE_Int          req_status;	//0: new request, 1: posted, 2 completed.
+	volatile HYPRE_Int          tag;
+	volatile HYPRE_Int          num_recvs, num_sends;
+	HYPRE_Complex      **recv_buffers;
+	HYPRE_Complex      **send_buffers;
+	hypre_CommPkg      *comm_pkg;
+	hypre_MPI_Request  *requests;
+	hypre_MPI_Status   *status;
+	omp_lock_t mutex;
+
+} hypre_CommSendRecvReq;
+
+
+typedef struct hypre_CommStaging
+{
+	HYPRE_Complex volatile **staging;
+	//omp_lock_t mutex;
+} hypre_CommStaging;
+
+volatile hypre_CommStaging *g_stg;
+
+
+std::atomic<int> g_new_comm_req;
+volatile hypre_CommSendRecvReq * g_comm_array;
+volatile int g_funneled_comm_spin=1;
+extern __thread int g_thread_id;
+extern int g_num_of_threads;
+
+
+void allocate_funneled_comm()
+{
+////	atomic_store_explicit (&g_new_comm_req, 0, memory_order_seq_cst);
+	g_new_comm_req = 0;
+	g_funneled_comm_spin = 1;
+	g_comm_array = (hypre_CommSendRecvReq *) malloc(sizeof(hypre_CommSendRecvReq)*g_num_of_threads);
+	g_stg = (volatile hypre_CommStaging *) malloc(sizeof(hypre_CommStaging)*g_num_of_threads);
+	int i;
+	for(i=0; i<g_num_of_threads; i++)
+	{
+		g_comm_array[i].req_status=-1;
+		omp_init_lock(const_cast<omp_lock_t*>(&g_comm_array[i].mutex));
+
+		g_stg[i].staging = (HYPRE_Complex volatile **) malloc(sizeof(HYPRE_Complex *)*g_num_of_threads);
+		//omp_init_lock(&g_stg[i].mutex);
+
+		int j;
+		for(j=0; j<g_num_of_threads; j++)
+			g_stg[i].staging[j] = NULL;
+	}
+}
+
+void deallocate_funneled_comm()
+{
+	//printf("inside deallocate_funneled_comm\n");
+	g_funneled_comm_spin = 0;
+
+}
+void funnelled_comm()
+{
+	int real_rank;
+	MPI_Comm_rank(MPI_COMM_WORLD, &real_rank);	//this will give real rank, not fake rank manipulated in mpistubs.c
+
+	while(g_funneled_comm_spin)
+	{
+
+		int t=0;
+
+		//int placed_requests = 0;
+		for(t=0; t<g_num_of_threads; t++)
+		{
+			if(g_comm_array[t].req_status==0 )//new request
+			{
+				//printf("new request for %d\n", t);
+				int i=0, j = 0;
+				omp_set_lock(const_cast<omp_lock_t*>(&g_comm_array[t].mutex));
+				g_thread_id = t;
+				MPI_Comm comm = hypre_CommPkgComm(g_comm_array[t].comm_pkg);
+
+				for(i = 0; i < g_comm_array[t].num_recvs; i++)
+				{
+					hypre_CommType *comm_type = hypre_CommPkgRecvType(g_comm_array[t].comm_pkg, i);
+					int src = hypre_CommTypeProc(comm_type);
+					int real_src = src / g_num_of_threads;
+
+					if(real_rank != real_src)	//if intra-thread comm
+					{
+						hypre_MPI_Irecv(g_comm_array[t].recv_buffers[i],
+								hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex),
+								hypre_MPI_BYTE, hypre_CommTypeProc(comm_type),
+								g_comm_array[t].tag, comm, &g_comm_array[t].requests[j++]);
+						if ( hypre_CommPkgFirstComm(g_comm_array[t].comm_pkg) )
+						{
+							int size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
+							hypre_CommTypeBufsize(comm_type)   -= size;
+							hypre_CommPkgRecvBufsize(g_comm_array[t].comm_pkg) -= size;
+						}
+					}
+				}
+
+				g_comm_array[t].num_recvs = j;
+
+				for(i = 0; i < g_comm_array[t].num_sends; i++)
+				{
+					hypre_CommType *comm_type = hypre_CommPkgSendType(g_comm_array[t].comm_pkg, i);
+					int dest = hypre_CommTypeProc(comm_type);
+					int real_dest = dest / g_num_of_threads;
+					if(real_rank != real_dest)	//if intra-thread comm
+					{
+						hypre_MPI_Isend(g_comm_array[t].send_buffers[i],
+								hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex),
+								hypre_MPI_BYTE, hypre_CommTypeProc(comm_type),
+								g_comm_array[t].tag, comm, &g_comm_array[t].requests[j++]);
+						if ( hypre_CommPkgFirstComm(g_comm_array[t].comm_pkg) )
+						{
+							int size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
+							hypre_CommTypeBufsize(comm_type)   -= size;
+							hypre_CommPkgSendBufsize(g_comm_array[t].comm_pkg) -= size;
+						}
+					}
+				}
+
+				g_comm_array[t].num_sends = j - g_comm_array[t].num_recvs;
+				g_comm_array[t].req_status=1;
+				//omp_unset_lock(&g_comm_array[t].mutex);
+				//printf("requests placed for thread %d\n", t);
+			}
+		}
+
+
+		//while there are no new requests, call mpi test to progress requests.
+		//int t;
+		for(t=0; t<g_num_of_threads; t++)
+		{
+			if(g_comm_array[t].req_status==1 /*&& g_comm_array[t].status != NULL  && g_comm_array[t].requests != NULL*/)	//request posted and status buffer is allocated
+			{
+				g_thread_id = t;
+				int flag;
+				//printf("testing for thread %d\n", t);
+				MPI_Testall(g_comm_array[t].num_recvs + g_comm_array[t].num_sends, g_comm_array[t].requests, &flag, g_comm_array[t].status);
+				//printf("tested for thread %d\n", t);
+				if(flag)
+				{
+					//printf("comm over for %d\n", t);
+					//omp_set_lock(&g_comm_array[t].mutex);
+					g_comm_array[t].req_status = 2; //completed
+					omp_unset_lock(const_cast<omp_lock_t*>(&g_comm_array[t].mutex));
+				}
+
+			}
+		}
+	}
+
+
+	int i;
+	for(i=0; i<g_num_of_threads; i++)
+	{
+		omp_destroy_lock(const_cast<omp_lock_t*>(&g_comm_array[i].mutex));
+		//omp_destroy_lock(&g_stg[i].mutex);
+		free(g_stg[i].staging);
+	}
+
+	if(g_stg) free((void*)g_stg);
+	if(g_comm_array) free((void*)g_comm_array);
+}
+
+
+#endif
+
+
+
 /*--------------------------------------------------------------------------
  * Initialize a non-blocking communication exchange.
  *
@@ -1161,105 +1234,93 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
    //in that case and do not update "requests" buffer
 
 #ifdef USE_FUNNELLED_COMM
-   //first push actual MPI comm into tl_mpi_info so that comm thread will post MPI request.
-   //then call MPI_Isend / irecv for inter-thread comm.
 
-   int real_num_sends=0, real_num_recvs=0;
-   extern volatile int g_num_of_threads;
-   extern __thread int g_real_rank, g_thread_id;
-   extern thread_local bool do_setup;
+   int real_rank;
+   MPI_Comm_rank(MPI_COMM_WORLD, &real_rank);	//this will give real rank, not fake rank manipulated in mpistubs.c
 
-   //part 1: post MPI
-   for(i = 0; i < num_recvs; i++){
-	   comm_type = hypre_CommPkgRecvType(comm_pkg, i);
-	   int src = hypre_CommTypeProc(comm_type);
-	   int real_src = src / g_num_of_threads;
 
-	   if(g_real_rank != real_src || do_setup == true){	//if not a thread of the same rank, post MPI
-		   real_num_recvs++;
-		   int size = hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex);
-		   tl_mpi_info.push_back(MPIInfo(recv_buffers[i], size, src, tag));
-	   }
+   omp_set_lock(const_cast<omp_lock_t*>(&g_comm_array[g_thread_id].mutex));
+   g_comm_array[g_thread_id].recv_buffers = recv_buffers;
+   g_comm_array[g_thread_id].send_buffers = send_buffers;
+   g_comm_array[g_thread_id].comm_pkg=comm_pkg;
+   g_comm_array[g_thread_id].requests = requests;
+   g_comm_array[g_thread_id].status = status;
+   g_comm_array[g_thread_id].num_recvs = num_recvs;
+   g_comm_array[g_thread_id].num_sends = num_sends;
+   g_comm_array[g_thread_id].tag = tag;
+   g_comm_array[g_thread_id].req_status = 0;
+   //atomic_fetch_add_explicit (&g_new_comm_req, 1, memory_order_seq_cst);
+   omp_unset_lock(const_cast<omp_lock_t*>(&g_comm_array[g_thread_id].mutex));
+
+   //share local sends with other threads. Need to use temporary staging, because sender can deallocate send_buffers as soon as its own comm is completed. Copying does not add overhead as threads are anyway waiting to complete comm
+   for(i = 0; i < num_sends; i++)
+   {
+      comm_type = hypre_CommPkgSendType(comm_pkg, i);
+	  int dest = hypre_CommTypeProc(comm_type);
+	  int real_dest = dest / g_num_of_threads;
+	  if(real_rank == real_dest)	//if intra-thread comm
+	  {
+		  int dest_thread_id = dest % g_num_of_threads;
+
+		  int data_size = hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex);
+		  if(data_size>0)
+		  {
+			  HYPRE_Complex * temp = (HYPRE_Complex *) malloc(data_size);
+			  memcpy(temp, send_buffers[i], data_size );
+
+			  while(g_stg[g_thread_id].staging[dest_thread_id] != NULL); ///wait till previous comm is completed by receiver thread
+
+			  //omp_set_lock(&g_stg[g_thread_id].mutex);
+			  g_stg[g_thread_id].staging[dest_thread_id] = temp;
+			  //omp_unset_lock(&g_stg[g_thread_id].mutex);
+		  }
+		  else
+			  printf("thread id %d, bytes: %d\n", g_thread_id, data_size);
+
+		  if ( hypre_CommPkgFirstComm(comm_pkg) )
+		  {
+			 size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
+			 hypre_CommTypeBufsize(comm_type)   -= size;
+			 hypre_CommPkgSendBufsize(comm_pkg) -= size;
+		  }
+	  }
    }
 
-
-   for(i = 0; i < num_sends; i++){
-	   comm_type = hypre_CommPkgSendType(comm_pkg, i);
-	   int dest = hypre_CommTypeProc(comm_type);
-	   int real_dest = dest / g_num_of_threads;
-
-	   if(g_real_rank != real_dest || do_setup == true){	//if not a thread of the same rank, post MPI
-		   real_num_sends++;
-		   int size = hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex);
-		   tl_mpi_info.push_back(MPIInfo(send_buffers[i], size, dest, tag));
-	   }
-   }
-
-   while(g_fun_comm==NULL);
-
-//   if(g_fun_comm[g_thread_id].mpi_request != NULL){
-//	   printf("mpi_request is not null\n");
-//	   fflush(stdout);
-//	   exit(1);
-//   }
-
-   g_fun_comm[g_thread_id].mpi_info = tl_mpi_info.data();
-   g_fun_comm[g_thread_id].comm = comm;
-   g_fun_comm[g_thread_id].mpi_request = requests;
-   g_fun_comm[g_thread_id].mpi_status = status;
-   g_fun_comm[g_thread_id].num_recvs = real_num_recvs;
-   g_fun_comm[g_thread_id].num_sends = real_num_sends;
-   std::atomic_thread_fence(std::memory_order_seq_cst );	//ensure status is updated at the end and is not reordered.
-   __asm__ __volatile__("":::"memory");
-   g_fun_comm[g_thread_id].status = 0;
-
-   num_requests = real_num_recvs + real_num_sends;
-
-   //part 2: post inter thread comm
-   j = 0;
-   hypre_MPI_Request dummy;
-   for(i = 0; i < num_sends; i++){
-	   comm_type = hypre_CommPkgSendType(comm_pkg, i);
-
-	   int dest = hypre_CommTypeProc(comm_type);
-	   int real_dest = dest / g_num_of_threads;
-
-	   if(g_real_rank == real_dest){	//inter-thread comm will take place inside hypre_MPI_Isend
-		   hypre_MPI_Isend(send_buffers[i],
-				   hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex),
-				   hypre_MPI_BYTE, hypre_CommTypeProc(comm_type),
-				   tag, comm, &dummy);
-	   }
-
-	   if ( hypre_CommPkgFirstComm(comm_pkg) )
-	   {
-		   size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
-		   hypre_CommTypeBufsize(comm_type)   -= size;
-		   hypre_CommPkgSendBufsize(comm_pkg) -= size;
-	   }
-   }
-
+   //receive local values from other threads.
    for(i = 0; i < num_recvs; i++)
    {
-	   comm_type = hypre_CommPkgRecvType(comm_pkg, i);
-	   int src = hypre_CommTypeProc(comm_type);
-	   int real_src = src / g_num_of_threads;
+      comm_type = hypre_CommPkgRecvType(comm_pkg, i);
 
-	   if(g_real_rank == real_src){	//inter-thread comm will take place inside hypre_MPI_Irecv
-		   hypre_MPI_Irecv(recv_buffers[i],
-				   hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex),
-				   hypre_MPI_BYTE, hypre_CommTypeProc(comm_type),
-				   tag, comm, &dummy);
-	   }
+	  int src = hypre_CommTypeProc(comm_type);
+	  int real_src = src / g_num_of_threads;
 
-	   if ( hypre_CommPkgFirstComm(comm_pkg) )
-	   {
-		   size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
-		   hypre_CommTypeBufsize(comm_type)   -= size;
-		   hypre_CommPkgRecvBufsize(comm_pkg) -= size;
-	   }
+	  if(real_rank == real_src)	//if intra-thread comm
+	  {
+		  int src_thread_id = src % g_num_of_threads;
+		  if(hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex) > 0)
+		  {
+			  while(g_stg[src_thread_id].staging[g_thread_id]==NULL){asm("pause");}
+
+			  //omp_set_lock(&g_stg[src_thread_id].mutex);
+			  memcpy(recv_buffers[i], const_cast<HYPRE_Complex *>(g_stg[src_thread_id].staging[g_thread_id]), hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex) );
+			  free((void *) g_stg[src_thread_id].staging[g_thread_id]);
+			  g_stg[src_thread_id].staging[g_thread_id] = NULL;
+			  //omp_unset_lock(&g_stg[src_thread_id].mutex);
+		  }
+		  else
+			  printf("recv thread id %d, bytes: %d\n", g_thread_id, hypre_CommTypeBufsize(comm_type)*sizeof(HYPRE_Complex));
+
+	      if ( hypre_CommPkgFirstComm(comm_pkg) )
+	      {
+	         size = hypre_CommPrefixSize(hypre_CommTypeNumEntries(comm_type));
+	         hypre_CommTypeBufsize(comm_type)   -= size;
+	         hypre_CommPkgRecvBufsize(comm_pkg) -= size;
+	      }
+	  }
+
    }
 
+   //printf("back to thread\n");
 #else
 
 
@@ -1403,21 +1464,16 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
     *--------------------------------------------------------------------*/
 
 #ifdef USE_FUNNELLED_COMM
-   extern __thread int g_thread_id;
-   hypre_MPI_Waitall(0, NULL, NULL);	//wait for inter-thread comm
-   if(hypre_CommHandleNumRequests(comm_handle) > 0)
-	   while(g_fun_comm[g_thread_id].status != 2); //wait for comm thread to signal completion.
-   std::atomic_thread_fence(std::memory_order_seq_cst );	//ensure status is updated at the end and is not reordered.
-   __asm__ __volatile__("":::"memory");
-   g_fun_comm[g_thread_id].mpi_info = NULL;
-   g_fun_comm[g_thread_id].mpi_request = NULL;
-   g_fun_comm[g_thread_id].mpi_status = NULL;
-   g_fun_comm[g_thread_id].num_sends = -1;
-   g_fun_comm[g_thread_id].num_recvs = -1;
-   g_fun_comm[g_thread_id].status = 2;
-   tl_mpi_info.clear();
-   std::atomic_thread_fence(std::memory_order_seq_cst );	//ensure status is updated at the end and is not reordered.
-   __asm__ __volatile__("":::"memory");
+
+	  struct timeval  tv1, tv2;
+//	  gettimeofday(&tv1, NULL);
+
+	  while(g_comm_array[g_thread_id].req_status != 2){asm("pause");}
+
+//	  gettimeofday(&tv2, NULL);
+//	  hypre_comm_time += (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 + (double) (tv2.tv_sec - tv1.tv_sec);
+
+
 
 #else
 

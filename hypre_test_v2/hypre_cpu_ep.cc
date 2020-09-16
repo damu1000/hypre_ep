@@ -566,14 +566,29 @@ int main(int argc1, char **argv1)
 		//cudaProfilerStart();
 #pragma omp parallel
 		{
-			omp_set_num_threads(input.team_size); //second level of parallelism
 			int teamid = omp_get_thread_num();
+		  if(teamid<num_of_threads){
+			omp_set_num_threads(input.team_size); //second level of parallelism
 #pragma omp parallel
 			{
 				int threadid = omp_get_thread_num();
+				int cpu = rank * num_of_threads * input.team_size + teamid * input.team_size + threadid;
+//				set_affinity(cpu);
+				printf("expected_rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu);
+
 				int cpu_affinity = get_affinity();
-//				printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
+				printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
 			}
+
+
+			}
+			else{
+//				set_affinity(rank * num_of_threads * input.team_size + 16);
+				int cpu_affinity = get_affinity();
+				int threadid = 0;
+				printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
+			}
+
 			/*int device_id=-1;
 			cudaGetDevice(&device_id);
 			cudaDeviceProp deviceProp;
