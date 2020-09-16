@@ -8,7 +8,7 @@
 #include <atomic>
 
 #define USE_INTER_THREAD_COMM
-#define USE_FUNNELLED_COMM
+//#define USE_FUNNELLED_COMM
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 #define USE_MULTIPLE_COMMS
 #define USE_ODD_EVEN_COMMS
