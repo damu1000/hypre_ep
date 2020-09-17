@@ -1120,9 +1120,6 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
     * pack send buffers
     *--------------------------------------------------------------------*/
 #ifdef HYPRE_USING_OPENMP
-   extern int hypre_min_workload;
-   int min_workload = hypre_min_workload;
-   hypre_min_workload = 0x7fffffff; //set large value to disable parallelization within loop macros
 #pragma omp parallel for
 #endif
    for (int i = 0; i < num_sends; i++)
@@ -1169,7 +1166,7 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
                {
                   dptr[di] = kptr[ki];
                }
-               hypre_BoxLoop2End(ki, di);
+               hypre_BasicBoxLoop2End(ki, di);
 #undef DEVICE_VAR
 
                dptr += unitst_array[ndim];
@@ -1189,9 +1186,6 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
          }
       }
    }
-#ifdef HYPRE_USING_OPENMP
-   hypre_min_workload = min_workload; //reset to original value
-#endif
 
    /* Copy buffer data from Device to Host */
    if (num_sends > 0 && alloc_dev_buffer)
@@ -1570,9 +1564,6 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
    }
 
 #ifdef HYPRE_USING_OPENMP
-   extern int hypre_min_workload;
-   int min_workload = hypre_min_workload;
-   hypre_min_workload = 0x7fffffff; //set large value to disable parallelization within loop macros
 #pragma omp parallel for
 #endif
    for (int i = 0; i < num_recvs; i++)
@@ -1620,7 +1611,7 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
                {
                   kptr[ki] += dptr[di];
                }
-               hypre_BoxLoop2End(ki, di);
+               hypre_BasicBoxLoop2End(ki, di);
 #undef DEVICE_VAR
 
             }
@@ -1633,7 +1624,7 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
                {
                   kptr[ki] = dptr[di];
                }
-               hypre_BoxLoop2End(ki, di);
+               hypre_BasicBoxLoop2End(ki, di);
    #undef DEVICE_VAR
 
             }
@@ -1642,9 +1633,7 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
          }
       }
    }
-#ifdef HYPRE_USING_OPENMP
-   hypre_min_workload = min_workload; //reset to original value
-#endif
+
    /*--------------------------------------------------------------------
     * turn off first communication indicator
     *--------------------------------------------------------------------*/
@@ -1726,9 +1715,6 @@ hypre_ExchangeLocalData( hypre_CommPkg *comm_pkg,
    copy_to_type = hypre_CommPkgCopyToType(comm_pkg);
 
 #ifdef HYPRE_USING_OPENMP
-   extern int hypre_min_workload;
-   int min_workload = hypre_min_workload;
-   hypre_min_workload = 0x7fffffff; //set large value to disable parallelization within loop macros
 #pragma omp parallel for
 #endif
    for (int i = 0; i < hypre_CommTypeNumEntries(copy_fr_type); i++)
@@ -1765,7 +1751,7 @@ hypre_ExchangeLocalData( hypre_CommPkg *comm_pkg,
                      /* add the data to existing values in memory */
                      to_dpl[ti] += fr_dpl[fi];
                   }
-               hypre_BoxLoop2End(fi, ti);
+               hypre_BasicBoxLoop2End(fi, ti);
 #undef DEVICE_VAR
                }
                else
@@ -1778,16 +1764,13 @@ hypre_ExchangeLocalData( hypre_CommPkg *comm_pkg,
                      /* copy the data over existing values in memory */
                      to_dpl[ti] = fr_dpl[fi];
                   }
-                  hypre_BoxLoop2End(fi, ti);
+                  hypre_BasicBoxLoop2End(fi, ti);
 #undef DEVICE_VAR
                }
             }
          }
       }
    }
-#ifdef HYPRE_USING_OPENMP
-   hypre_min_workload = min_workload; //reset to original value
-#endif
 
    return hypre_error_flag;
 }

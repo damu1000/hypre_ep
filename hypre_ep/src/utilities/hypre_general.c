@@ -21,7 +21,7 @@
  * hypre initialization
  *
  *****************************************************************************/
-int hypre_min_workload=0;
+thread_local int hypre_min_workload=0;
 
 void
 HYPRE_Init( hypre_int argc, char *argv[] )

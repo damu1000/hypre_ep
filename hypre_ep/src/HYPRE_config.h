@@ -99,7 +99,7 @@
 /* #undef HYPRE_PRINT_ERRORS */
 
 /* Enable OpenMP support */
-/* #undef HYPRE_USING_OPENMP */
+#define HYPRE_USING_OPENMP 1
 
 /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
  * MEMORY
