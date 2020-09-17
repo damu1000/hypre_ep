@@ -550,6 +550,7 @@ int main(int argc1, char **argv1)
 		if(input.xthreads>0 && input.ythreads>0 && input.zthreads>0){	//override #threads
 
 #ifdef USE_FUNNELLED_COMM
+			printf ("using funneled comm\n");
 			omp_set_num_threads(num_of_threads+1);
 #else
 			omp_set_num_threads(num_of_threads);
@@ -558,7 +559,7 @@ int main(int argc1, char **argv1)
 			if(rank ==0) printf("number of threads %d, %d, %d\n", input.xthreads, input.ythreads, input.zthreads);
 		}
 
-		if(rank ==0) printf("Number of threads %d\n", num_of_threads);
+		if(rank ==0) printf("Number of teams %d, threads per team %d\n", num_of_threads, input.team_size);
 
 		assignPatchToEP(input, rank, size, num_of_threads); //assuming EP.
 
@@ -574,10 +575,8 @@ int main(int argc1, char **argv1)
 				int threadid = omp_get_thread_num();
 				int cpu = rank * num_of_threads * input.team_size + teamid * input.team_size + threadid;
 //				set_affinity(cpu);
-				printf("expected_rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu);
-
 				int cpu_affinity = get_affinity();
-				printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
+				printf("rank %d team %d thread %d actual_affinity %d\n",rank, teamid, threadid, cpu_affinity);
 			}
 
 

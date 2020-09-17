@@ -165,8 +165,9 @@ int main(int argc, char **argv)
 
 		//ViewDouble X("X", x_dim * y_dim * z_dim), B("B", x_dim * y_dim * z_dim);
 		//ViewStencil4 A("A", x_dim * y_dim * z_dim);
-		Stencil4 A[x_dim * y_dim * z_dim * patches_per_rank];
-		double X[x_dim * y_dim * z_dim * patches_per_rank], B[x_dim * y_dim * z_dim * patches_per_rank];
+		Stencil4 *A = new Stencil4[x_dim * y_dim * z_dim * patches_per_rank];
+		double *X = new double[x_dim * y_dim * z_dim * patches_per_rank];
+		double *B = new double[x_dim * y_dim * z_dim * patches_per_rank];
 
 		//Kokkos::parallel_for(Kokkos::RangePolicy<KernelSpace>(0, x_dim * y_dim * z_dim), KOKKOS_LAMBDA(int i){
 		for(int i=0; i<x_dim * y_dim * z_dim * patches_per_rank; i++){
@@ -371,6 +372,10 @@ int main(int argc, char **argv)
 		HYPRE_StructStencilDestroy(stencil);
 		HYPRE_StructGridDestroy(grid);
 		hypre_EndTiming (tHypreAll_);
+
+		delete []A;
+		delete []X;
+		delete []B;
 
 		HYPRE_Finalize();
 

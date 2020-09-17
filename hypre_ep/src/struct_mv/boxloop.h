@@ -287,7 +287,7 @@ typedef struct hypre_Boxloop_struct
       zypre_BoxLoopSetK(1, i1);                                               \
       for (hypre__J = 0; hypre__J < hypre__JN; hypre__J++)                    \
       {                                                                       \
-         _Pragma("simd")                                                      \
+         _Pragma("omp simd")                                                  \
          for (hypre__I = 0; hypre__I < hypre__IN; hypre__I++)                 \
          {
 
@@ -323,7 +323,7 @@ typedef struct hypre_Boxloop_struct
       zypre_BoxLoopSetK(2, i2);                                               \
       for (hypre__J = 0; hypre__J < hypre__JN; hypre__J++)                    \
       {                                                                       \
-         _Pragma("simd")                                                      \
+         _Pragma("omp simd")                                                  \
          for (hypre__I = 0; hypre__I < hypre__IN; hypre__I++)                 \
          {
 
@@ -364,7 +364,7 @@ typedef struct hypre_Boxloop_struct
       zypre_BoxLoopSetK(3, i3);                                               \
       for (hypre__J = 0; hypre__J < hypre__JN; hypre__J++)                    \
       {                                                                       \
-         _Pragma("simd")                                                      \
+         _Pragma("omp simd")                                                  \
          for (hypre__I = 0; hypre__I < hypre__IN; hypre__I++)                 \
          {
 
@@ -428,6 +428,51 @@ typedef struct hypre_Boxloop_struct
      }                                                                          \
 }
 
+
+#define hypre_BoxLoop2ReductionBeginSimd(ndim, loop_size, dbox1, start1, stride1, i1, \
+                                                      dbox2, start2, stride2, i2, reducesum) \
+{                                                                               \
+	 HYPRE_Int i1, i2;                                                          \
+	 zypre_BoxLoopDeclare();                                                    \
+	 zypre_BoxLoopDeclareK(1);                                                  \
+	 zypre_BoxLoopDeclareK(2);                                                  \
+	 zypre_BoxLoopInit(ndim, loop_size);                                        \
+	 zypre_BoxLoopInitK(1, dbox1, start1, stride1, i1);                         \
+	 zypre_BoxLoopInitK(2, dbox2, start2, stride2, i2);                         \
+	 auto boxLoopF = [&] (int hypre__block, int hypre__IN, int hypre__JN, int hypre__I, int hypre__J, int hypre__d, int *hypre__i1, decltype(reducesum)& reducesum)        \
+	 {                                                                          \
+        int hypre__i[] = {hypre__i1[0], hypre__i1[1], hypre__i1[2], hypre__i1[3]}; \
+		HYPRE_Int i1, i2;                                                       \
+		zypre_BoxLoopSet();                                                     \
+		zypre_BoxLoopSetK(1, i1);                                               \
+		zypre_BoxLoopSetK(2, i2);                                               \
+		for (hypre__J = 0; hypre__J < hypre__JN; hypre__J++)                    \
+		{                                                                       \
+		   Pragma(omp simd HYPRE_BOX_REDUCTION)                                                      \
+		   for (hypre__I = 0; hypre__I < hypre__IN; hypre__I++)                 \
+		   {
+
+#define hypre_BoxLoop2ReductionEndSimd(i1, i2, reducesum)                           \
+              i1++;                                              \
+              i2++;                                              \
+           }                                                                    \
+           zypre_BoxLoopInc1();                                                 \
+           i1 += hypre__ikinc1[hypre__d];                                       \
+           i2 += hypre__ikinc2[hypre__d];                                       \
+           zypre_BoxLoopInc2();                                                 \
+        }                                                                       \
+     };                                                                         \
+     extern thread_local int hypre_min_workload;                                             \
+     if(hypre__tot > hypre_min_workload){                                       \
+        OMP1                                                                    \
+        for (hypre__block = 0; hypre__block < hypre__num_blocks; hypre__block++)\
+           boxLoopF(hypre__block, hypre__IN, hypre__JN, hypre__I, hypre__J, hypre__d, hypre__i, reducesum);       \
+     }                                                                          \
+     else{                                                                      \
+        for (hypre__block = 0; hypre__block < hypre__num_blocks; hypre__block++)\
+            boxLoopF(hypre__block, hypre__IN, hypre__JN, hypre__I, hypre__J, hypre__d, hypre__i, reducesum);      \
+     }                                                                          \
+}
 
 #define hypre_LoopBegin(size,idx)                                             \
 {                                                                             \

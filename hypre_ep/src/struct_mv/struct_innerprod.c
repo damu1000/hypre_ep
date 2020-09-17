@@ -87,7 +87,7 @@ hypre_StructInnerProd( hypre_StructVector *x,
 #endif
 
 #define DEVICE_VAR is_device_ptr(yp,xp)
-      hypre_BoxLoop2ReductionBegin(ndim, loop_size,
+      hypre_BoxLoop2ReductionBeginSimd(ndim, loop_size,
                                    x_data_box, start, unit_stride, xi,
                                    y_data_box, start, unit_stride, yi,
                                    box_sum)
@@ -95,7 +95,7 @@ hypre_StructInnerProd( hypre_StructVector *x,
          HYPRE_Real tmp = xp[xi] * hypre_conj(yp[yi]); 
          box_sum += tmp; 
       }
-      hypre_BoxLoop2ReductionEnd(xi, yi, box_sum);
+      hypre_BoxLoop2ReductionEndSimd(xi, yi, box_sum);
 
       local_result += (HYPRE_Real) box_sum;
    }

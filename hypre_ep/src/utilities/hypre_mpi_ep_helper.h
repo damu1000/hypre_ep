@@ -18,9 +18,14 @@
 #error "Define either USE_MULTIPLE_COMMS or USE_TAG_PAR_COMM, but not both."
 #endif
 
-#if defined(USE_TAG_PAR_COMM) && defined(USE_MULTIPLE_COMMS)
+#if defined(USE_TAG_PAR_COMM) && defined(USE_FUNNELLED_COMM)
 #error "Define either USE_FUNNELLED_COMM or USE_TAG_PAR_COMM, but not both."
 #endif
+
+#if defined(USE_INTER_THREAD_COMM) && defined(USE_FUNNELLED_COMM)
+#error "Define either USE_FUNNELLED_COMM or USE_INTER_THREAD_COMM, but not both."
+#endif
+
 
 /************************************************************************************************************************************
 

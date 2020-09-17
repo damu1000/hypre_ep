@@ -218,13 +218,13 @@ hypre_SemiInterp( void               *interp_vdata,
 
       if(stridec[0]==1 && stride[0]==1){
 #define DEVICE_VAR is_device_ptr(ep,xcp)
-		  hypre_BoxLoop2Begin(hypre_StructMatrixNDim(P), loop_size,
+		  hypre_BoxLoop2BeginSimd(hypre_StructMatrixNDim(P), loop_size,
 							  e_dbox, start, stride, ei,
 							  xc_dbox, startc, stridec, xci);
 		  {
 			 ep[ei] = xcp[xci];
 		  }
-		  hypre_BoxLoop2End(ei, xci);
+		  hypre_BoxLoop2EndSimd(ei, xci);
 #undef DEVICE_VAR
       }
       else{
