@@ -34,6 +34,8 @@ Global declaration needed for EP
 ************************************************************************************************************************************/
 
 volatile int g_num_of_threads = 0;	//total number of threads.
+int gteam_size=1;
+
 //tag multipliers. assuming default values of 8,8,16 -> from LSB to MSB, 16 bits for tag, 8 bits for dest thread id, 8 bits for src thread id
 int dest_multiplier = 0x00010000, src_multiplier=0x01000000, src_eliminate_and=0x00ffffff;
 //int new_tag = tag == MPI_ANY_TAG ? MPI_ANY_TAG : (src_thread * 0x01000000) + (dest_thread * 0x00010000) + tag % 0x00010000; converted to
@@ -471,9 +473,10 @@ int (*hypre_get_thread_id)();		//function pointer to store function which will r
 							//WHOLE IMPLEMENTATION WILL FAIL IF THIS FUNCTION FAILS
 
 
-void hypre_set_num_threads(int n, int (*f)())	//call from master thread BEFORE workers are created. not thread safe
+void hypre_set_num_threads(int n, int team_size, int (*f)())	//call from master thread BEFORE workers are created. not thread safe
 {
 	g_num_of_threads = n;
+	gteam_size = team_size;
 	hypre_get_thread_id=f;
 	std::atomic_store_explicit (&g_collective_sync_count, 0, std::memory_order_seq_cst);
 	std::atomic_store_explicit (&g_collective_sync_copy_count, 0, std::memory_order_seq_cst);

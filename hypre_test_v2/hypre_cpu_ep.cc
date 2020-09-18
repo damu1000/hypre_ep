@@ -563,7 +563,7 @@ int main(int argc1, char **argv1)
 
 		assignPatchToEP(input, rank, size, num_of_threads); //assuming EP.
 
-		hypre_set_num_threads(num_of_threads, omp_get_thread_num);
+		hypre_set_num_threads(num_of_threads, input.team_size, omp_get_thread_num);
 		//cudaProfilerStart();
 #pragma omp parallel
 		{

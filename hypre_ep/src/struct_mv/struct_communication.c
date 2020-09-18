@@ -1159,15 +1159,28 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
             {
                kptr = lptr + order[ll]*stride_array[ndim];
 	       
+               if(stride_array[0]==1){
 #define DEVICE_VAR is_device_ptr(dptr,kptr)
-               hypre_BasicBoxLoop2Begin(ndim, length_array,
-                                        stride_array, ki,
-                                        unitst_array, di);
-               {
-                  dptr[di] = kptr[ki];
-               }
-               hypre_BasicBoxLoop2End(ki, di);
+				   hypre_BasicBoxLoop2BeginSimd(ndim, length_array,
+											stride_array, ki,
+											unitst_array, di);
+				   {
+					  dptr[di] = kptr[ki];
+				   }
+				   hypre_BasicBoxLoop2EndSimd(ki, di);
 #undef DEVICE_VAR
+               }
+               else{
+#define DEVICE_VAR is_device_ptr(dptr,kptr)
+				   hypre_BasicBoxLoop2Begin(ndim, length_array,
+											stride_array, ki,
+											unitst_array, di);
+				   {
+					  dptr[di] = kptr[ki];
+				   }
+				   hypre_BasicBoxLoop2End(ki, di);
+#undef DEVICE_VAR
+               }
 
                dptr += unitst_array[ndim];
             }
@@ -1604,29 +1617,53 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
 
             if (action > 0)
             {
+            	if(stride_array[0]==1){
 #define DEVICE_VAR is_device_ptr(kptr,dptr)
-               hypre_BasicBoxLoop2Begin(ndim, length_array,
-                                        stride_array, ki,
-                                        unitst_array, di);
-               {
-                  kptr[ki] += dptr[di];
-               }
-               hypre_BasicBoxLoop2End(ki, di);
+				   hypre_BasicBoxLoop2BeginSimd(ndim, length_array,
+											stride_array, ki,
+											unitst_array, di);
+				   {
+					  kptr[ki] += dptr[di];
+				   }
+				   hypre_BasicBoxLoop2EndSimd(ki, di);
 #undef DEVICE_VAR
-
+            	}
+            	else{
+#define DEVICE_VAR is_device_ptr(kptr,dptr)
+				   hypre_BasicBoxLoop2Begin(ndim, length_array,
+											stride_array, ki,
+											unitst_array, di);
+				   {
+					  kptr[ki] += dptr[di];
+				   }
+				   hypre_BasicBoxLoop2End(ki, di);
+#undef DEVICE_VAR
+            	}
             }
             else
             {
+            	if(stride_array[0]==1){
 #define DEVICE_VAR is_device_ptr(kptr,dptr)
-               hypre_BasicBoxLoop2Begin(ndim, length_array,
-                                        stride_array, ki,
-                                        unitst_array, di);
-               {
-                  kptr[ki] = dptr[di];
-               }
-               hypre_BasicBoxLoop2End(ki, di);
-   #undef DEVICE_VAR
-
+				   hypre_BasicBoxLoop2BeginSimd(ndim, length_array,
+											stride_array, ki,
+											unitst_array, di);
+				   {
+					  kptr[ki] = dptr[di];
+				   }
+				   hypre_BasicBoxLoop2EndSimd(ki, di);
+#undef DEVICE_VAR
+            	}
+            	else{
+#define DEVICE_VAR is_device_ptr(kptr,dptr)
+				   hypre_BasicBoxLoop2Begin(ndim, length_array,
+											stride_array, ki,
+											unitst_array, di);
+				   {
+					  kptr[ki] = dptr[di];
+				   }
+				   hypre_BasicBoxLoop2End(ki, di);
+#undef DEVICE_VAR
+            	}
             }
 
             dptr += unitst_array[ndim];
@@ -1743,29 +1780,62 @@ hypre_ExchangeLocalData( hypre_CommPkg *comm_pkg,
 
                if (action > 0)
                {
+            	   if(fr_stride_array[0]==1 && to_stride_array[0]==1){
 #define DEVICE_VAR is_device_ptr(to_dpl,fr_dpl)
-                 hypre_BasicBoxLoop2Begin(ndim, length_array,
-                                          fr_stride_array, fi,
-                                          to_stride_array, ti);
-                  {
-                     /* add the data to existing values in memory */
-                     to_dpl[ti] += fr_dpl[fi];
-                  }
-               hypre_BasicBoxLoop2End(fi, ti);
+					 hypre_BasicBoxLoop2BeginSimd(ndim, length_array,
+											  fr_stride_array, fi,
+											  to_stride_array, ti);
+					  {
+						 /* add the data to existing values in memory */
+						 to_dpl[ti] += fr_dpl[fi];
+					  }
+					  hypre_BasicBoxLoop2EndSimd(fi, ti);
 #undef DEVICE_VAR
+            	   }
+            	   else{
+#define DEVICE_VAR is_device_ptr(to_dpl,fr_dpl)
+					 hypre_BasicBoxLoop2Begin(ndim, length_array,
+											  fr_stride_array, fi,
+											  to_stride_array, ti);
+					  {
+						 /* add the data to existing values in memory */
+						 to_dpl[ti] += fr_dpl[fi];
+					  }
+					  hypre_BasicBoxLoop2End(fi, ti);
+#undef DEVICE_VAR
+            	   }
                }
                else
                {
+
+
+            	   if(fr_stride_array[0]==1 && to_stride_array[0]==1){
 #define DEVICE_VAR is_device_ptr(to_dpl,fr_dpl)
-                  hypre_BasicBoxLoop2Begin(ndim, length_array,
-                                           fr_stride_array, fi,
-                                           to_stride_array, ti);
-                  {
-                     /* copy the data over existing values in memory */
-                     to_dpl[ti] = fr_dpl[fi];
-                  }
-                  hypre_BasicBoxLoop2End(fi, ti);
+					  hypre_BasicBoxLoop2BeginSimd(ndim, length_array,
+											   fr_stride_array, fi,
+											   to_stride_array, ti);
+					  {
+						 /* copy the data over existing values in memory */
+						 to_dpl[ti] = fr_dpl[fi];
+					  }
+					  hypre_BasicBoxLoop2EndSimd(fi, ti);
 #undef DEVICE_VAR
+            	   }
+            	   else{
+#define DEVICE_VAR is_device_ptr(to_dpl,fr_dpl)
+					  hypre_BasicBoxLoop2Begin(ndim, length_array,
+											   fr_stride_array, fi,
+											   to_stride_array, ti);
+					  {
+						 /* copy the data over existing values in memory */
+						 to_dpl[ti] = fr_dpl[fi];
+					  }
+					  hypre_BasicBoxLoop2End(fi, ti);
+#undef DEVICE_VAR
+            	   }
+
+
+
                }
             }
          }

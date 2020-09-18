@@ -260,7 +260,8 @@ HYPRE_Int  hypre__tot, hypre__div, hypre__mod;\
 HYPRE_Int  hypre__block, hypre__num_blocks;\
 HYPRE_Int  hypre__d, hypre__ndim;\
 HYPRE_Int  hypre__I, hypre__J, hypre__IN, hypre__JN;\
-HYPRE_Int  hypre__i[HYPRE_MAXDIM+1], hypre__n[HYPRE_MAXDIM+1]
+HYPRE_Int  hypre__i[HYPRE_MAXDIM+1], hypre__n[HYPRE_MAXDIM+1];\
+HYPRE_Int  hypre__start_line=__LINE__
 
 #define zypre_BoxLoopDeclareK(k) \
 HYPRE_Int  hypre__ikstart##k, hypre__i0inc##k;\

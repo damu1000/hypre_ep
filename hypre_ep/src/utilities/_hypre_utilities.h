@@ -2002,7 +2002,7 @@ HYPRE_Int hypre_MPI_Imrecv(void 				*buf,
 					hypre_MPI_Message 		*message,
 					hypre_MPI_Request *request);
 
-void hypre_set_num_threads(int n, int (*f)());	//defined in hypre_mpi_ep_helper.h
+void hypre_set_num_threads(int n, int team_size, int (*f)());	//defined in hypre_mpi_ep_helper.h
 void hypre_init_thread();	//defined in hypre_mpi_ep_helper.h
 void hypre_destroy_thread();	//defined in hypre_mpi_ep_helper.h
 
