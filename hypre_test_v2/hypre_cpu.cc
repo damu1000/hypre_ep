@@ -282,7 +282,7 @@ int main(int argc, char **argv)
 				solver_created = true;
 			}
 
-			HYPRE_StructPCGSetMaxIter(*solver, 20);
+			HYPRE_StructPCGSetMaxIter(*solver, input.hypre_iterations);
 			HYPRE_StructPCGSetTol(*solver, tolerance);
 			HYPRE_StructPCGSetTwoNorm(*solver,  1);
 			HYPRE_StructPCGSetRelChange(*solver,  0);

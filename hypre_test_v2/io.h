@@ -93,6 +93,7 @@ struct xmlInput{
 	int verify{0};
 	int timesteps{10};
 	int output_interval{10};
+	int hypre_iterations{20};
 
 };
 
@@ -138,6 +139,8 @@ xmlInput parseInput(const char * file, int rank){
     		   input.output_interval = atoi(val.c_str());
     	   }else if(name == "team_size"){
     		   input.team_size = std::max(1, atoi(val.c_str()));
+    	   }else if(name == "hypre_iterations"){
+    		   input.hypre_iterations = atoi(val.c_str());
     	   }
     	   else{
     		   printf("input element %s is not supported at %s:%d\n", cur->name, __FILE__, __LINE__);

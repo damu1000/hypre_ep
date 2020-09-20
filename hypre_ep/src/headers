@@ -1,0 +1,6 @@
+#!/bin/bash
+
+cd struct_mv
+./headers
+cd ..
+

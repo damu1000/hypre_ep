@@ -56,6 +56,10 @@ titan 4: mpicxx hypre_cpu.cc -std=c++11 -fp-model precise -xAVX -I/home/sci/damo
 #include <unistd.h>
 #include "io.h"
 
+#if (BOXLOOP_VER == 5)
+#error "Set BOXLOOP_VER to 1 to 4, but NOT 5 in hypre/src/struct_mv/_hypre_struct_mv.h and boxloop.h"
+#endif
+
 //#define USE_FUNNELLED_COMM
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 
@@ -69,7 +73,7 @@ struct Stencil4{
 //typedef Kokkos::View<double*, Kokkos::LayoutRight, KernelSpace::memory_space> ViewDouble;
 //typedef Kokkos::View<Stencil4*, Kokkos::LayoutRight, KernelSpace::memory_space> ViewStencil4;
 
-double tolerance = 1.e-25;
+double tolerance = 0;
 char **argv;
 int argc;
 thread_local int do_setup=1;
@@ -418,7 +422,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 			solver_created = true;
 		}
 
-		HYPRE_StructPCGSetMaxIter(*solver, 100);
+		HYPRE_StructPCGSetMaxIter(*solver, input.hypre_iterations);
 		HYPRE_StructPCGSetTol(*solver, tolerance);
 		HYPRE_StructPCGSetTwoNorm(*solver,  1);
 		HYPRE_StructPCGSetRelChange(*solver,  0);
@@ -461,12 +465,12 @@ void hypre_solve(const char * exp_type, xmlInput input)
 
 		auto solve_only_end = std::chrono::system_clock::now();
 
-		if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
-		{
-			std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << " at " <<  __FILE__  << ":" << __LINE__ << "\n";
-			fflush(stdout);
-			exit(1);
-		}
+//		if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
+//		{
+//			std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << " at " <<  __FILE__  << ":" << __LINE__ << "\n";
+//			fflush(stdout);
+//			exit(1);
+//		}
 
 		for(int i=0; i<patches_per_rank; i++)
 			HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, &X[i * x_dim * y_dim * z_dim]);

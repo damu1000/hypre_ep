@@ -43,6 +43,7 @@ e.g. mpirun -np 16 ./1_cpu cpu_run input.xml
 
 The command spawns 16 MPI ranks and uses sample hypre_test_v2/input.xml. It creates a grid of total 16 patches arranged as 4x2x2 patches along x, y and z dimensions. Each patch is of size 32 cubed. "cpu_run" identifies the output - "cpu_run" can be any string. Ensure total number of patches are divisible by number of ranks. 
 
+
 2. hypre_cpu_ep.cc:  hypre_cpu.cc converted into hypre_cpu_ep.cc by creating extra openmp threads and a calling couple of additional functions. Link with hypre_ep. Each openmp thread is assigned with one or more patches calls hypre (contrary to hypre_cpu) for its own patches. Requires libxml2. Compile using:
 
 mpicxx hypre_cpu_ep.cc -std=c++11 -I<...>/hypre_ep/src/build/include/ -I<...>/hypre_ep/src/ -L<...>/hypre_ep/src/build/lib -lHYPRE -I<libxml2 path>/include/libxml2 -L<libxml2 path>/lib -lxml2 -g -O3 -o 2_ep -fopenmp
@@ -51,14 +52,26 @@ Run similar to 1_cpu, except now there will some threads instead of ranks. There
 
 export OMP_PROC_BIND=spread,spread
 export OMP_PLACES=threads
-export OMP_STACKSIZE=1G
 export OMP_NESTED=true
   
 mpirun -np 4 ./2_ep ep_run input.xml
 
-To compare the accuracy of ep: Uncomment calls to functions write_to_file and verifyX in files hypre_cpu.cc and hypre_cpu_ep.cc respectively. Create a folder "output" in hypre_test_v2 and run 1_cpu and 2_ep using same number of patches and same number of ranks/EndPoints. 1_cpu will write results into files and 2_ep will compare its own results with those dumped in the file.
+To compare the accuracy of ep, set to 1 in input.xml. Create a folder "output" in hypre_test_v2 and run 1_cpu and 2_ep using same number of patches. 1_cpu will write results into files and 2_ep will compare its own results with those dumped in the file.
 
-3. hypre_gpu.cc: To be used for hypre ep cuda code. Kokkos needed. In progress.
+
+3. hypre_cpu_custom_ep.cc: This version uses lightweight custom_parallel_for instead of openmp - runs faster than openmp by 20 to 30%. This is similar to ICCS version. Set BOXLOOP_VER to 5 in hypre/src/struct_mv/boxloop.h and run headers. Optionaly directly update hypre/src/struct_mv/_hypre_struct_mv.h, which is bad but works for now. Compile same as hypre_cpu_ep.cc. Thread binding to the correct cores is absolutely critical for this version and is tricky while using optimizations such as hierarchical parallelism and funneled comm. Do not use OMP_PROC_BIND and OMP_PLACES. Instead use environment variables HYPRE_BINDING (used for EP threads and worker threads) and HYPRE_BINDING_COMM (used for comm threads) to give list of cores. The list will be equally divided among the ranks on a node and further among threads of the rank. Ensure the total number of threads (excluding comm thread) less than or equal to the number of cores specified in the list.
+
+e.g. On a 16 core node with 2 hw threads per core, if 2 ranks are spawned with 2 EPs/rank with 4 worker threads/EP, then total 16 threads will do the computation and 2 threads (1 per rank) will funnel the comm. Use export HYPRE_BINDING=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16 and export HYPRE_BINDING_COMM=31,32. This will give the following binding:
+
+rank 0: cores 0-7 and 31, rank 1: cores 8-15 and 32
+
+EP 0: 0-3, EP 1: 4-7, EP2: 8-11, and EP3: 12-15 with 4 worker threads of every EP mapped to individual cores with EP's cores.
+
+Comm threads of ranks 0 and 1 are mapped to cores 31 and 32 respectively.
+
+Compilation, inputs and execution is same as hypre_cpu_ep.cc
+
+4. hypre_gpu.cc: To be used for hypre ep cuda code. Kokkos needed. In progress.
 
 
 ### Optimization switches:
@@ -74,7 +87,9 @@ Enable/disable following optimizations.
 
 - Efficient patch assignment: Inter-rank communication can be reduced by using block-wise patch assignment in 3 dimensions rather than assigning patches linearly. xthreads, ythreads, zthreads parameters in the input file can be used to do so.
 
-- Adaptive hierarchical parallelism: The main problem with out-of-box OpenMP implementation of parallelizing data parallel loops using OpenMP is not having enough work to justify OpenMP threads synchronization. The multi-grid algorithm in Hypre goes on coarsening the mesh. As a result, the number of cells reduce at every multi-grid level and OpenMP synchronization dominates than the actual computations at coarser levels. Yet such data parallel loops can be benifitial at scale because they can reduce number of ranks (or number of EPs) and reduce global reduction costs (MPI_allreduce), provided OpenMP synchronization overheads are reduced. (Global reduction takes up-to 30% of execution time on 512 nodes of Theta.) The new mechanism uses two level OpenMP parallelism. Each EP now spawns its own worker threads (thus each EP is a team of threads now rather than a single thread), but "adaptive" nature uses OpenMP pragma only if number of loop iterations are more than the value set in environment variable "HYPRE_MIN_WORKLOAD". Uses parameter "team_size" in input.xml to set number of worker threads. The downside is CPU cores remain unused when the number of cells are less than HYPRE_MIN_WORKLOAD. Enable by adding "--with-openmp" in configure line of hypre_ep. Can be disabled at runtime my setting very high value for HYPRE_MIN_WORKLOAD or by setting team_size in inputs.xml to 1. Need to find a sweet spot with number of EPs per rank and team_size so as to keep the cost of global reductions and local openmp synchronization overheads minimal.
+- Hierarchical parallelism - The main problem with out-of-box OpenMP implementation of parallelizing data parallel loops using OpenMP is not having enough work to justify OpenMP threads synchronization. The multi-grid algorithm in Hypre goes on coarsening the mesh. As a result, the number of cells reduce at every multi-grid level and OpenMP synchronization dominates than the actual computations at coarser levels resulting into slowdowns. That's where the EP model helps where each thread acts as a rank and no thread syncrhonization (except MPI_reduce) is needed. Yet using small number of threads (2 to 4) can be helpful to run data parallel loops for thoughput and also reduce communication - "a sweet spot" between both the models. That's when upto 1.4x speedup can be seen. Use parameter "team_size" in input.xml to set number of worker threads.
+
+- Adaptive hierarchical parallelism (In Progress): Each EP now spawns its own worker threads (thus each EP is a team of threads now rather than a single thread), but "adaptive" nature uses OpenMP pragma only if number of loop iterations are more than the value set in environment variable "HYPRE_MIN_WORKLOAD". The downside is CPU cores remain unused when the number of cells are less than HYPRE_MIN_WORKLOAD. Need to find a sweet spot with number of EPs per rank and team_size so as to keep the cost of global reductions and local openmp synchronization overheads minimal. Need to see whether changing number of threads at run-time based on the loop count helps.
 
 - Vectorization: Enable vectorization of few key kernels (which is not done by default): Add "-DUSE_SIMD" to CFLAGS and CXXFLAGS. Do this as the last optimization while checking incremental performance of different optimizations. Depending on problem size and communication pattern vectorization can give upto 20% speed-up on KNL. (Of corse the same can be done on CPU only version also)
 

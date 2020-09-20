@@ -52,6 +52,10 @@ titan4: mpicxx hypre_cpu_custom_ep.cc -std=c++11 -fp-model precise -xAVX -I/home
 #include "io.h"
 #include "custom_threads.h"
 
+#if (BOXLOOP_VER != 5)
+#error "Set BOXLOOP_VER to 5 in hypre/src/struct_mv/_hypre_struct_mv.h and boxloop.h"
+#endif
+
 __thread int do_setup=1;
 
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
@@ -408,7 +412,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 			solver_created = true;
 		}
 
-		HYPRE_StructPCGSetMaxIter(*solver, 20);
+		HYPRE_StructPCGSetMaxIter(*solver, input.hypre_iterations);
 		HYPRE_StructPCGSetTol(*solver, tolerance);
 		HYPRE_StructPCGSetTwoNorm(*solver,  1);
 		HYPRE_StructPCGSetRelChange(*solver,  0);
@@ -519,24 +523,15 @@ void HypreDriver(const char * exp_type, xmlInput input)
 	hypre_set_num_threads(num_of_threads, input.team_size, get_custom_team_id);
 
 #ifdef USE_FUNNELLED_COMM
-	custom_partition_master(0, num_of_threads+1, [&](int t){
-#else
-	custom_partition_master(0, num_of_threads, [&](int t){
+	num_of_threads++;
 #endif
 
-		printf("inside partition master t:%d\n", t);
-
+	custom_partition_master(0, num_of_threads, [&](int t){
     	int thread_id = hypre_init_thread();
-
-		printf("after hypre_init_thread t:%d\n", thread_id);
-
-
   		if(thread_id>=0){	//main thread manages comm, others execute hypre code.
   			hypre_solve(exp_type, input);
   		}
 	});
-
-
 }
 
 int main(int argc1, char **argv1)

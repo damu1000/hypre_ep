@@ -24,7 +24,7 @@ To get simple hardcoded mapping similar to the one used in hypre_cpu.cc, set xth
 int verify: 0 or 1: verify answers if set to 1. Default 0 
 int timesteps: number of timesteps to run for
 int output_interval: timestep interval at which output timing is displayed
-
+int hypre_iterations: FIXED number of CG iterations in hypre. default 20.
 -->
 
 <input>
@@ -34,12 +34,15 @@ int output_interval: timestep interval at which output timing is displayed
 <ypatches>2</ypatches>
 <zpatches>2</zpatches>
 
-<xthreads>4</xthreads>
+<!--Total number of threads = 8. So if 2 ranks are spawned, there will be 1 patch per core (assuming 1 core available for 1 thread)-->
+<xthreads>2</xthreads>
 <ythreads>2</ythreads>
 <zthreads>1</zthreads>
-<team_size>4</team_size>
+<team_size>2</team_size>
 
-<verify>1</verify>
+<hypre_iterations>20</hypre_iterations>
+
+<verify>0</verify>
 <timesteps>5</timesteps>
 <output_interval>1</output_interval>
 
