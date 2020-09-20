@@ -13,20 +13,15 @@ CPU Only
 export MPICH_CXX=g++
 export HYPRE_PATH=/home/damodars/uintah_kokkos_dev/hypre_kokkos/src/build
 
-mpicxx hypre_test.cc -std=c++11 -I$(HYPRE_PATH)/include/ -L$(HYPRE_PATH)/lib -lHYPRE -g -O3
 
-mpicxx 2_hypre_gpu.cc -std=c++11 -I/home/damodars/uintah_kokkos_dev/hypre_kokkos/src/build/include/ -L/home/damodars/uintah_kokkos_dev/hypre_kokkos/src/build/lib -lHYPRE -g -O3 -I$KOKKOS_PATH/build/include -L$KOKKOS_PATH/build/lib -lkokkos --expt-extended-lambda -o gpu -arch=sm_52 
+albion: mpicxx hypre_cpu_ep.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src/ -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2  -g -O3 -o 2_ep -fopenmp
 
+theta: CC hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -lxml2 -g -O3 -fopenmp -ldl -o 2_ep -dynamic
 
- mpicxx hypre_cpu_ep.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src/ -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -I/home/damodars/install/libxml2-2.9.7/build/include/libxml2 -L/home/damodars/install/libxml2-2.9.7/build/lib -lxml2  -g -O3 -o 2_ep -fopenmp
-
-CC hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/damodars/hypre_ep/hypre_ep/src -L/home/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE -lxml2 -g -O3 -fopenmp -ldl -o 2_ep -dynamic
-
-mpicxx hypre_cpu_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/damodars/hypre_ep/hypre_ep/src -I/home/sci/damodars/hypre_ep/hypre_ep/src/build/include/ -I/home/sci/damodars/installs/libxml2-2.9.7/build/include/libxml2/ -L/home/sci/damodars/hypre_ep/hypre_ep/src/build/lib -lHYPRE  -L/home/sci/damodars/installs/libxml2-2.9.7/build/lib/ -lxml2 -g -O3 -fopenmp -ldl -o 2_ep
+cthulhu: mpicxx hypre_cpu_custom_ep.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/damodars/hypre_ep_new/KNL/hypre_ep/src -I/home/sci/damodars/hypre_ep_new/KNL/hypre_ep/src/build/include/ -I/home/sci/damodars/installs/libxml2-2.9.7/build/include/libxml2/ -L/home/sci/damodars/hypre_ep_new/KNL/hypre_ep/src/build/lib -lHYPRE  -L/home/sci/damodars/installs/libxml2-2.9.7/build/lib/ -lxml2 -g -O2 -fopenmp -ldl -o 2_ep
 
 
-
-titan 4: mpicxx hypre_cpu.cc -std=c++11 -fp-model precise -xAVX -I/home/sci/damodars/hypre_ep_new/hypre_cpu/src/build/include/ -I/usr/include/libxml2/ -L/home/sci/damodars/hypre_ep_new/hypre_cpu/src/build/lib -lHYPRE -lxml2 -g -O2 -fopenmp -ldl -o 1_cpu
+titan4: mpicxx hypre_cpu_custom_ep.cc -std=c++11 -fp-model precise -xAVX -I/home/sci/damodars/hypre_ep_new/hypre_ep/src -I/home/sci/damodars/hypre_ep_new/hypre_ep/src/build/include/ -I/usr/include/libxml2/ -L/home/sci/damodars/hypre_ep_new/hypre_ep/src/build/lib -lHYPRE -lxml2 -g -O2 -fopenmp -ldl -o 2_ep
 
  */
 
@@ -55,8 +50,10 @@ titan 4: mpicxx hypre_cpu.cc -std=c++11 -fp-model precise -xAVX -I/home/sci/damo
 #include <stdlib.h>
 #include <unistd.h>
 #include "io.h"
+#include "custom_threads.h"
 
-//#define USE_FUNNELLED_COMM
+__thread int do_setup=1;
+
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 
 //typedef Kokkos::Serial KernelSpace;
@@ -69,10 +66,9 @@ struct Stencil4{
 //typedef Kokkos::View<double*, Kokkos::LayoutRight, KernelSpace::memory_space> ViewDouble;
 //typedef Kokkos::View<Stencil4*, Kokkos::LayoutRight, KernelSpace::memory_space> ViewStencil4;
 
-double tolerance = 1.e-25;
+double tolerance = 0;
 char **argv;
 int argc;
-thread_local int do_setup=1;
 
 typedef struct IntVector
 {
@@ -246,13 +242,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	int number_of_patches = input.xpatches * input.ypatches * input.zpatches;
 	int num_of_threads = input.xthreads * input.ythreads * input.zthreads;
 
-	
 	HYPRE_Init(argc, argv);
-
-	hypre_init_thread();
-
-	if(omp_get_thread_num()==num_of_threads) //this is comm thread so dont call hypre, just return
-		return;
 
 	int rank, size;
 	hypre_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -266,6 +256,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 
 	int num_cells = number_of_patches*input.patch_size*input.patch_size*input.patch_size;
 
+	//disabled for now
 	thread_local extern double _hypre_comm_time;
 	//----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -275,7 +266,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 	std::vector<int> my_patches;
 	getMyPatches( my_patches, rank );
 
-	createCommMap(g_ep_superpatch.data(), g_superpatches, g_num_of_ranks3d, input.xthreads, input.ythreads, input.zthreads);	//in hypre_mpi_ep_helper.h
+//	createCommMap(g_ep_superpatch.data(), g_superpatches, g_num_of_ranks3d, input.xthreads, input.ythreads, input.zthreads);	//in hypre_mpi_ep_helper.h
 
 	int patches_per_rank = my_patches.size();
 	int x_dim = input.patch_size, y_dim = input.patch_size, z_dim = input.patch_size;
@@ -319,7 +310,6 @@ void hypre_solve(const char * exp_type, xmlInput input)
 
 
 	//----------------------------------------------------- hypre -----------------------------------------------------------------------------------------------
-
 
 	HYPRE_StructSolver * solver = new HYPRE_StructSolver;
 	HYPRE_StructSolver * precond_solver = new HYPRE_StructSolver;
@@ -418,7 +408,7 @@ void hypre_solve(const char * exp_type, xmlInput input)
 			solver_created = true;
 		}
 
-		HYPRE_StructPCGSetMaxIter(*solver, 100);
+		HYPRE_StructPCGSetMaxIter(*solver, 20);
 		HYPRE_StructPCGSetTol(*solver, tolerance);
 		HYPRE_StructPCGSetTwoNorm(*solver,  1);
 		HYPRE_StructPCGSetRelChange(*solver,  0);
@@ -461,12 +451,12 @@ void hypre_solve(const char * exp_type, xmlInput input)
 
 		auto solve_only_end = std::chrono::system_clock::now();
 
-		if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
+		/*if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
 		{
 			std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << " at " <<  __FILE__  << ":" << __LINE__ << "\n";
 			fflush(stdout);
 			exit(1);
-		}
+		}*/
 
 		for(int i=0; i<patches_per_rank; i++)
 			HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, &X[i * x_dim * y_dim * z_dim]);
@@ -523,6 +513,32 @@ void hypre_solve(const char * exp_type, xmlInput input)
 }	//end of hypre_solve
 
 
+void HypreDriver(const char * exp_type, xmlInput input)
+{
+	int num_of_threads = input.xthreads * input.ythreads * input.zthreads;
+	hypre_set_num_threads(num_of_threads, input.team_size, get_custom_team_id);
+
+#ifdef USE_FUNNELLED_COMM
+	custom_partition_master(0, num_of_threads+1, [&](int t){
+#else
+	custom_partition_master(0, num_of_threads, [&](int t){
+#endif
+
+		printf("inside partition master t:%d\n", t);
+
+    	int thread_id = hypre_init_thread();
+
+		printf("after hypre_init_thread t:%d\n", thread_id);
+
+
+  		if(thread_id>=0){	//main thread manages comm, others execute hypre code.
+  			hypre_solve(exp_type, input);
+  		}
+	});
+
+
+}
+
 int main(int argc1, char **argv1)
 {
 	if(argc1 != 3){
@@ -531,84 +547,36 @@ int main(int argc1, char **argv1)
 	}
 	argc = argc1;
 	argv = argv1;
-	
+
 	const char * exp_type = argv[1];	//cpu / gpu / gpu-mps / gpu-superpatch. Only to print in output.
 
-//	Kokkos::initialize(argc, argv1);
-	{
-		int required=MPI_THREAD_MULTIPLE, provided;
-		MPI_Init_thread(&argc, &argv, required, &provided);
-		
-		//Kokkos::OpenMP::partition_master( hypre_solve, omp_get_num_threads(), 1);
-		
-//		Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::OpenMP>(0, partitions), [&](int i){
-//			hypre_solve(partitions, 1);
-//		});
-
-		int rank, size;
-		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-		MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-		xmlInput input = parseInput(argv[2], rank);
-		int num_of_threads = input.xthreads * input.ythreads * input.zthreads;
-
-		if(input.xthreads>0 && input.ythreads>0 && input.zthreads>0){	//override #threads
-
-#ifdef USE_FUNNELLED_COMM
-			printf ("using funneled comm\n");
-			omp_set_num_threads(num_of_threads+1);
-#else
-			omp_set_num_threads(num_of_threads);
-#endif
-
-			if(rank ==0) printf("number of threads %d, %d, %d\n", input.xthreads, input.ythreads, input.zthreads);
-		}
-
-		if(rank ==0) printf("Number of teams %d, threads per team %d\n", num_of_threads, input.team_size);
-
-		assignPatchToEP(input, rank, size, num_of_threads); //assuming EP.
-
-		hypre_set_num_threads(num_of_threads, input.team_size, omp_get_thread_num);
-		//cudaProfilerStart();
-#pragma omp parallel
-		{
-			int teamid = omp_get_thread_num();
-		  if(teamid<num_of_threads){
-			omp_set_num_threads(input.team_size); //second level of parallelism
-#pragma omp parallel
-			{
-				int threadid = omp_get_thread_num();
-				int cpu = rank * num_of_threads * input.team_size + teamid * input.team_size + threadid;
-//				set_affinity(cpu);
-				int cpu_affinity = get_affinity();
-				printf("rank %d team %d thread %d actual_affinity %d\n",rank, teamid, threadid, cpu_affinity);
-			}
+	int required=MPI_THREAD_MULTIPLE, provided;
+	MPI_Init_thread(&argc, &argv, required, &provided);
 
 
-			}
-			else{
-//				set_affinity(rank * num_of_threads * input.team_size + 16);
-				int cpu_affinity = get_affinity();
-				int threadid = 0;
-				printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
-			}
+	int rank, size;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-			/*int device_id=-1;
-			cudaGetDevice(&device_id);
-			cudaDeviceProp deviceProp;
-			cudaGetDeviceProperties(&deviceProp, device_id);
-			printf("Device id: %d,  Device PCI Domain ID / Bus ID / location ID:   %d / %d / %d, cpu_affinity: %d\n", 
-					device_id, deviceProp.pciDomainID, deviceProp.pciBusID, deviceProp.pciDeviceID, cpu_affinity);*/
-			
-			hypre_solve(exp_type, input);
-		}
-		//cudaProfilerStop();
-		if(rank ==0) printf("Solved successfully\n");
-		MPI_Finalize();			
+	xmlInput input = parseInput(argv[2], rank);
+	int num_of_threads = input.xthreads * input.ythreads * input.zthreads;
 
 
-	}
-//	Kokkos::finalize();
+	if(rank ==0) printf("Number of teams %d, threads per team %d\n", num_of_threads, input.team_size);
+
+	assignPatchToEP(input, rank, size, num_of_threads); //assuming EP.
+
+
+	custom_thread_driver(num_of_threads, input.team_size, HypreDriver, exp_type, input);
+
+
+	if(rank ==0) printf("Solved successfully\n");
+	MPI_Finalize();
+
+
 	return 0;
 
 }
+
+
+

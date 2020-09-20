@@ -7,11 +7,11 @@
 #include <stddef.h>
 #include <atomic>
 
-#define USE_INTER_THREAD_COMM
-//#define USE_FUNNELLED_COMM
+//#define USE_INTER_THREAD_COMM
+#define USE_FUNNELLED_COMM
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
-#define USE_MULTIPLE_COMMS
-#define USE_ODD_EVEN_COMMS
+//#define USE_MULTIPLE_COMMS
+//#define USE_ODD_EVEN_COMMS
 //#define USE_TAG_PAR_COMM /* either TAG_PAR_COMM or MULTIPLE_COMMS but not both */
 
 #if defined(USE_TAG_PAR_COMM) && defined(USE_MULTIPLE_COMMS)
@@ -66,7 +66,7 @@ intra-rank send-recv without MPI
 
 #include<thread>
 
-thread_local bool do_setup=true;
+extern __thread int do_setup;
 
 void ** g_send_buff;
 void ** g_recv_buff;
@@ -577,7 +577,7 @@ void hypre_set_num_threads(int n, int team_size, int (*f)())	//call from master 
 
 }
 
-void hypre_init_thread()	//to be called by every thread
+int hypre_init_thread()	//to be called by every thread
 {
 	MPI_Comm_rank(MPI_COMM_WORLD, &g_rank);
 	g_real_rank = g_rank;
@@ -588,10 +588,14 @@ void hypre_init_thread()	//to be called by every thread
 	tl_prevtag = -1;
 
 #ifdef USE_FUNNELLED_COMM
-	if(g_thread_id==g_num_of_threads)//use last thread as comm thread
+	if(g_thread_id==g_num_of_threads || g_thread_id==-1){//last thread as comm thread for openmp, -1 for custom partition_master
+		g_thread_id = -1;
 		funnelled_comm();
+		g_thread_id = -1;
+	}
 #endif
 
+	return g_thread_id;
 }
 
 void hypre_destroy_thread()	//ideally should be called after every call to multithreaded Hypre solve to avoid any memory leaks. //call from master thread AFTER workers are joined

@@ -35,15 +35,14 @@ HYPRE_Init( hypre_int argc, char *argv[] )
 	}
 //	else
 //		hypre_min_workload = 64;
-#endif
 
-#ifdef HYPRE_USING_MPI_EP
-	hypre_init_thread();
 	extern __thread int g_rank;
 	if(g_rank==0)
 		printf("hypre_min_workload per thread %d\n", hypre_min_workload);
+
 #endif
-	
+
+
    /*
    HYPRE_Int  num_procs, myid;
    

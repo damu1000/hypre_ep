@@ -693,7 +693,7 @@ HYPRE_THREAD_LOCAL_EP double _hypre_comm_time=0.0;
 
 #define start_time()	\
 struct timeval  tv1, tv2;	\
-gettimeofday(&tv1, NULL);	
+gettimeofday(&tv1, NULL);
 
 #define end_time()	\
 gettimeofday(&tv2, NULL);	\
@@ -1751,7 +1751,9 @@ hypre_MPI_Waitall( HYPRE_Int          count,
 	start_time();
 	HYPRE_Int ierr;
 	
+#ifdef USE_INTER_THREAD_COMM
 	int ircount = irWaitAll();
+#endif
 
 	if(count > 0){
 //		printf("calling mpi_waitall %d %d\n", ircount, count);

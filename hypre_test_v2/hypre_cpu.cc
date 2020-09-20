@@ -17,7 +17,7 @@ mpicxx hypre_cpu.cc -std=c++11 -I/home/damodars/hypre_ep/hypre_cpu/src/build/inc
 
 CC hypre_cpu.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/damodars/hypre_ep/hypre_cpu/src/build/include/ -L/home/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu -dynamic
 
-mpicxx hypre_cpu.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/damodars/hypre_ep/hypre_cpu/src/build/include/ -I/home/sci/damodars/installs/libxml2-2.9.7/build/include/libxml2/ -L/home/sci/damodars/hypre_ep/hypre_cpu/src/build/lib -lHYPRE  -L/home/sci/damodars/installs/libxml2-2.9.7/build/lib/ -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
+cthulhu: mpicxx hypre_cpu.cc -std=c++11 -fp-model precise -xMIC-AVX512 -I/home/sci/damodars/hypre_ep_new/KNL/hypre_cpu/src/build/include/ -I/home/sci/damodars/installs/libxml2-2.9.7/build/include/libxml2/ -L/home/sci/damodars/hypre_ep_new/KNL/hypre_cpu/src/build/lib -lHYPRE  -L/home/sci/damodars/installs/libxml2-2.9.7/build/lib/ -lxml2 -g -O3 -fopenmp -ldl -o 1_cpu
 
  */
 
@@ -54,7 +54,7 @@ struct Stencil4{
 //typedef Kokkos::View<double*, Kokkos::LayoutRight, KernelSpace::memory_space> ViewDouble;
 //typedef Kokkos::View<Stencil4*, Kokkos::LayoutRight, KernelSpace::memory_space> ViewStencil4;
 
-double tolerance = 1.e-25;
+double tolerance = 0;
 
 typedef struct IntVector
 {
@@ -282,7 +282,7 @@ int main(int argc, char **argv)
 				solver_created = true;
 			}
 
-			HYPRE_StructPCGSetMaxIter(*solver, 100);
+			HYPRE_StructPCGSetMaxIter(*solver, 20);
 			HYPRE_StructPCGSetTol(*solver, tolerance);
 			HYPRE_StructPCGSetTwoNorm(*solver,  1);
 			HYPRE_StructPCGSetRelChange(*solver,  0);
@@ -323,11 +323,11 @@ int main(int argc, char **argv)
 
 			auto solve_only_end = std::chrono::system_clock::now();
 
-			if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
-			{
-				std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << "\n";
-				exit(1);
-			}
+//			if(rank ==0 && (final_res_norm > tolerance || std::isfinite(final_res_norm) == 0))
+//			{
+//				std::cout << "HypreSolver not converged in " << num_iterations << " iterations, final residual= " << final_res_norm << "\n";
+//				exit(1);
+//			}
 
 			for(int i=0; i<patches_per_rank; i++)
 				HYPRE_StructVectorGetBoxValues(*HX, low[i].value, high[i].value, &X[i * x_dim * y_dim * z_dim]);
