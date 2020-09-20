@@ -1895,17 +1895,17 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 
 #define executeLoop()\
 	if(loop_dim[2]>1)\
-	custom_parallel_for(0, loop_dim[2], f);\
+		custom_parallel_for(0, loop_dim[2], f);\
 	else if(loop_dim[2]==1)\
 		f(0);
 
 //#define executeLoopReduction(reducesum)\
 //	if(loop_dim[2]>1)\
-//		custom_parallel_for(0, loop_dim[2], f, reducesum);\
+//		custom_parallel_reduce(0, loop_dim[2], f, reducesum);\
 //	else if(loop_dim[2]==1)\
 //		f(0, reducesum);
 
-//use serial reduction for now
+//use serial reduction for now. Used during setup. Changed struct_innerproduce.c not to use reduction loop. Dirty but works for now
 #define executeLoopReduction(reducesum)\
 	for(int i=0; i<loop_dim[2]; i++)\
 		f(i, reducesum);

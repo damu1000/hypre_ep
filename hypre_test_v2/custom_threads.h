@@ -1,7 +1,7 @@
 #ifndef custom_thread_h
 #define custom_thread_h
 
-//#define USE_FUNNELLED_COMM
+#define USE_FUNNELLED_COMM
 
 //#define help_neighbor
 
@@ -27,7 +27,7 @@ void custom_partition_master(int b, int e, std::function<void(int)> f);
 void custom_parallel_for(int b, int e, std::function<void(int)> f);
 
 #ifdef __cplusplus /* If this is a C++ compiler, use C linkage */
-extern "C" {
+extern "C++" {
 #endif
 
 extern thread_local int cust_g_team_id, cust_g_thread_id;

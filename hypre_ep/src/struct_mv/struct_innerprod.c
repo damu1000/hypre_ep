@@ -21,6 +21,9 @@
 /*--------------------------------------------------------------------------
  * hypre_StructInnerProd
  *--------------------------------------------------------------------------*/
+#if BOXLOOP_VER==5
+extern int get_team_size();
+#endif
 
 HYPRE_Real
 hypre_StructInnerProd( hypre_StructVector *x,
@@ -49,6 +52,14 @@ hypre_StructInnerProd( hypre_StructVector *x,
 #endif
 
    HYPRE_Real       local_result = 0.0;
+
+#if BOXLOOP_VER==5
+   HYPRE_Int        num_threads = get_team_size();
+   HYPRE_Real *local_sum = (HYPRE_Real *)malloc (sizeof(HYPRE_Real)*num_threads);
+#endif
+
+   for(int j=0; j<num_threads; j++)
+	   local_sum[j]=0.0;
    
    hypre_SetIndex(unit_stride, 1);
 
@@ -87,19 +98,35 @@ hypre_StructInnerProd( hypre_StructVector *x,
 #endif
 
 #define DEVICE_VAR is_device_ptr(yp,xp)
-      hypre_BoxLoop2ReductionBeginSimd(ndim, loop_size,
+
+
+#if BOXLOOP_VER==5
+      hypre_BoxLoop2BeginSimd(ndim, loop_size,
                                    x_data_box, start, unit_stride, xi,
-                                   y_data_box, start, unit_stride, yi,
-                                   box_sum)
+                                   y_data_box, start, unit_stride, yi)
       {
-         HYPRE_Real tmp = xp[xi] * hypre_conj(yp[yi]); 
-         box_sum += tmp; 
+    	  extern __thread int cust_g_thread_id;
+		  local_sum[cust_g_thread_id] += xp[xi] * hypre_conj(yp[yi]);
       }
-      hypre_BoxLoop2ReductionEndSimd(xi, yi, box_sum);
+      hypre_BoxLoop2EndSimd(xi, yi);
 
-      local_result += (HYPRE_Real) box_sum;
+   for(int j=0; j<num_threads; j++)
+	   local_result += local_sum[j];
+#else
+
+   hypre_BoxLoop2ReductionBeginSimd(ndim, loop_size,
+                                x_data_box, start, unit_stride, xi,
+                                y_data_box, start, unit_stride, yi,
+                                box_sum)
+   {
+      HYPRE_Real tmp = xp[xi] * hypre_conj(yp[yi]);
+      box_sum += tmp;
    }
+   hypre_BoxLoop2ReductionEndSimd(xi, yi, box_sum);
 
+   local_result += (HYPRE_Real) box_sum;
+#endif
+   }
    process_result = (HYPRE_Real) local_result;
 
    hypre_MPI_Allreduce(&process_result, &final_innerprod_result, 1,
