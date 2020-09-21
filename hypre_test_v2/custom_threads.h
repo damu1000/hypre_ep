@@ -1,7 +1,7 @@
 #ifndef custom_thread_h
 #define custom_thread_h
 
-#define USE_FUNNELLED_COMM
+//#define USE_FUNNELLED_COMM
 
 //#define help_neighbor
 
