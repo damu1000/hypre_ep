@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 		set_affinity(rank);
 		int cpu_affinity = get_affinity();
 
-		printf("rank %d cpu %d\n",rank, cpu_affinity);
+//		printf("rank %d cpu %d\n",rank, cpu_affinity);
 
 		if(argc != 3){
 			printf("Enter arguments id_string and input file name. exiting\n");

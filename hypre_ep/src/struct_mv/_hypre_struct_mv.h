@@ -1829,8 +1829,13 @@ hypre__J = hypre__thread;  i1 = i2 = 0; \
 
 #endif
 
+//|| BOXLOOP_VER==2 || BOXLOOP_VER==3 || BOXLOOP_VER==4
+#if ((BOXLOOP_VER==1 ) && !defined(HYPRE_USING_OPENMP))
+#error "provide --with-openmp option while configuring if BOXLOOP_VER is set to 1 to 4"
+#endif
 
-#if (BOXLOOP_VER && defined(HYPRE_USING_OPENMP))
+
+#if (BOXLOOP_VER==5 && defined(HYPRE_USING_OPENMP))
 #error "Do not give --with-openmp option while configuring if BOXLOOP_VER is set to 5 (using custom parallel_for)"
 #endif
 
@@ -1865,7 +1870,7 @@ typedef struct hypre_Box_info_struct{
 
 #if BOXLOOP_VER==1
 //use simple openmp for 1
-#define executeLoop()\
+#define executeLoop(SIMDL)\
 	if(loop_dim[2]>1){\
 		Pragma(omp parallel for HYPRE_BOX_REDUCTION HYPRE_SMP_SCHEDULE) \
 		for(int hypre___k=0; hypre___k < loop_dim[2]; hypre___k++) \
@@ -1890,12 +1895,21 @@ typedef struct hypre_Box_info_struct{
 
 extern "C++"{
 #include<functional>
-extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
+extern void custom_parallel_for(int b, int e, std::function<void(int)> f, int active_threads);
 
+#define SIMD_LEN 8
 
-#define executeLoop()\
-	if(loop_dim[2]>1)\
-		custom_parallel_for(0, loop_dim[2], f);\
+#define executeLoop(SIMDL)\
+	HYPRE_Int hypre__end_line=__LINE__;                                        \
+	if(loop_dim[2]>1){\
+		HYPRE_Int hypre__lines=hypre__end_line - hypre__start_line - 3;            \
+		HYPRE_Int hypre__work = (loop_dim[2]*loop_dim[1]*loop_dim[0]*hypre__lines + SIMDL - 1) / SIMDL;     \
+		extern thread_local int hypre_min_workload;                                \
+		extern int gteam_size;                                                     \
+		HYPRE_Int threads = (hypre__work + hypre_min_workload - 1) / hypre_min_workload;                   \
+		threads = (threads < gteam_size) ? threads : gteam_size;                \
+		custom_parallel_for(0, loop_dim[2], f, threads);\
+	}\
 	else if(loop_dim[2]==1)\
 		f(0);
 
@@ -1917,6 +1931,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 #define zypre_newBoxLoop0Begin(ndim, loop_size)\
 {\
 	int *loop_dim = loop_size; \
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	auto f = [&](int hypre___k)\
 	{\
 		int hypre___i, hypre___j;\
@@ -1930,7 +1945,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 			}\
 		}\
 	};\
-	executeLoop();\
+	executeLoop(1);\
 }
 
 
@@ -1938,6 +1953,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
                             dbox1, start1, stride1, i1)\
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1;\
 	zypre_CalcStride(boxinfo1, dbox1, start1, stride1);\
 	auto f = [&](int hypre___k)\
@@ -1955,7 +1971,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 			i1 += boxinfo1.stride[1];\
 		}\
 	};\
-	executeLoop();\
+	executeLoop(1);\
 }
 
 
@@ -1964,6 +1980,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
                             dbox1, start1, stride1, i1)\
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1;\
 	zypre_CalcStride(boxinfo1, dbox1, start1, stride1);\
 	auto f = [&](int hypre___k)\
@@ -1982,7 +1999,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 			i1 += boxinfo1.stride[1];\
 		}\
 	};\
-	executeLoop();\
+	executeLoop(SIMD_LEN);\
 }
 
 
@@ -1991,6 +2008,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 							dbox2, start2, stride2, i2) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2;\
 	zypre_CalcStride(boxinfo1, dbox1, start1, stride1);	\
 	zypre_CalcStride(boxinfo2, dbox2, start2, stride2); \
@@ -2014,7 +2032,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 			i2 += boxinfo2.stride[1];\
 		}\
 	};\
-	executeLoop();\
+	executeLoop(1);\
 }
 
 
@@ -2023,6 +2041,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 							dbox2, start2, stride2, i2) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2;\
 	zypre_CalcStride(boxinfo1, dbox1, start1, stride1);	\
 	zypre_CalcStride(boxinfo2, dbox2, start2, stride2); \
@@ -2047,7 +2066,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 			i2 += boxinfo2.stride[1];\
 		}\
 	};\
-	executeLoop();\
+	executeLoop(SIMD_LEN);\
 }
 
 
@@ -2186,6 +2205,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 							dbox3, start3, stride3, i3) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2, boxinfo3;\
 	zypre_CalcStride(boxinfo1, dbox1, start1, stride1);	\
 	zypre_CalcStride(boxinfo2, dbox2, start2, stride2);\
@@ -2211,7 +2231,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 			i3 += boxinfo3.stride[1];\
 		}\
 	};\
-	executeLoop();\
+	executeLoop(1);\
 }
 
 
@@ -2223,6 +2243,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 							dbox3, start3, stride3, i3) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2, boxinfo3;\
 	zypre_CalcStride(boxinfo1, dbox1, start1, stride1);	\
 	zypre_CalcStride(boxinfo2, dbox2, start2, stride2);\
@@ -2249,7 +2270,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 			i3 += boxinfo3.stride[1];\
 		}\
 	};\
-	executeLoop();\
+	executeLoop(SIMD_LEN);\
 }
 
 
@@ -2261,6 +2282,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 							dbox4, start4, stride4, i4) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2, boxinfo3, boxinfo4;\
 	zypre_CalcStride(boxinfo1, dbox1, start1, stride1);	\
 	zypre_CalcStride(boxinfo2, dbox2, start2, stride2);\
@@ -2295,7 +2317,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f);
 		i3 += boxinfo3.stride[2];\
 		i4 += boxinfo4.stride[2];\
 	};\
-	executeLoop();\
+	executeLoop(1);\
 }
 #if BOXLOOP_VER==5
 };

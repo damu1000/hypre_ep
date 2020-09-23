@@ -56,11 +56,12 @@ hypre_StructInnerProd( hypre_StructVector *x,
 #if BOXLOOP_VER==5
    HYPRE_Int        num_threads = get_team_size();
    HYPRE_Real *local_sum = (HYPRE_Real *)malloc (sizeof(HYPRE_Real)*num_threads);
-#endif
 
    for(int j=0; j<num_threads; j++)
 	   local_sum[j]=0.0;
-   
+#endif
+
+
    hypre_SetIndex(unit_stride, 1);
 
    boxes = hypre_StructGridBoxes(hypre_StructVectorGrid(y));

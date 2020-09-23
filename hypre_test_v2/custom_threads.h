@@ -24,7 +24,7 @@
 #include<omp.h>
 
 void custom_partition_master(int b, int e, std::function<void(int)> f);
-void custom_parallel_for(int b, int e, std::function<void(int)> f);
+void custom_parallel_for(int b, int e, std::function<void(int)> f, int active_threads);
 
 #ifdef __cplusplus /* If this is a C++ compiler, use C linkage */
 extern "C++" {
@@ -40,7 +40,7 @@ int get_team_size();
 //int patch_dim, number_of_patches, N;//, max_vec_rank;
 
 void cpartition_master(int b, int e, void(*f)(int));
-void cparallel_for(int b, int e, void(*f)(int));
+void cparallel_for(int b, int e, void(*f)(int), int active_threads);
 void thread_init(int num_partitions, int threads_per_partition, int *affinity, int g_nodal_rank);
 void destroy();
 void wait_for_init(int p, int t, int *affinity, int g_nodal_rank);
@@ -97,7 +97,8 @@ typedef struct thread_team
 	volatile int m_end;	//beginning of team loop.	//size 4 bytes
 	std::atomic<int> m_completed{0};	//size 4 bytes
 	volatile int m_num_of_calls{0};		//size 4 bytes
-	char dummy[16];
+	volatile int m_active_threads{0};		//size 4 bytes
+	char dummy[12];
 
 } thread_team;
 
@@ -180,18 +181,21 @@ void team_worker(int team_id, int thread_id)
 				if(num_of_calls < g_team[cust_g_team_id].m_num_of_calls)
 				{
 					num_of_calls++;
-					//printf("%d worker %d-%d\n",rank, team_id, thread_id);
-					int e = my_team->m_end;
-					int chunk = e - my_team->m_begin;
-					chunk = chunk / l2 / 2;
-					chunk = std::max(chunk, 1);
-					int b;
-					while((b = my_team->m_begin.fetch_add(chunk, std::memory_order_seq_cst))< e)
+//					printf("%d worker %d-%d active threads:%d\n",rank, team_id, thread_id, my_team->m_active_threads);
+					if(thread_id < my_team->m_active_threads)
 					{
-						int b_next = std::min(e, b+chunk);
-						for(; b<b_next; b++)
+						int e = my_team->m_end;
+						int chunk = e - my_team->m_begin;
+						chunk = chunk / l2 / 2;
+						chunk = std::max(chunk, 1);
+						int b;
+						while((b = my_team->m_begin.fetch_add(chunk, std::memory_order_seq_cst))< e)
 						{
-							my_team->m_fun(b);
+							int b_next = std::min(e, b+chunk);
+							for(; b<b_next; b++)
+							{
+								my_team->m_fun(b);
+							}
 						}
 					}
 					my_team->m_completed++;
@@ -309,10 +313,10 @@ void destroy()
 }
 
 int g_rank_temp;
-void custom_parallel_for(int s, int e, std::function<void(int)> f)
+void custom_parallel_for(int s, int e, std::function<void(int)> f, int active_threads)
 {
 	thread_team *my_team = &g_team[cust_g_team_id];
-
+	my_team->m_active_threads = active_threads;
 	my_team->m_fun = f;
 //	std::atomic_thread_fence(std::memory_order_seq_cst);
 	my_team->m_end = e;
@@ -346,16 +350,17 @@ void custom_parallel_for(int s, int e, std::function<void(int)> f)
 
 	if(my_team->m_fun)
 		my_team->m_fun=NULL;
+	my_team->m_active_threads = 0;
 	//printf("%d - %d %d: completed custom_parallel_for %d / %d\n",
 	//		g_rank_temp, cust_g_team_id, cust_g_thread_id, my_team->m_completed.load(std::memory_order_seq_cst), l2);
 }
 
 double parallel_time = 0.0;
 
-void cparallel_for(int b, int e, void(*f)(int))
+void cparallel_for(int b, int e, void(*f)(int), int active_threads)
 {
 	//auto start = std::chrono::system_clock::now();
-	custom_parallel_for(b, e, f);
+	custom_parallel_for(b, e, f, active_threads);
 	/*auto end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed_seconds = end-start;
 	parallel_time += elapsed_seconds.count();*/

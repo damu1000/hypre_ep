@@ -11,6 +11,7 @@
  ***********************************************************************EHEADER*/
 
 #include "_hypre_struct_mv.h"
+#include <sys/time.h>
 
 #define DEBUG 0
 
@@ -1119,10 +1120,16 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
    /*--------------------------------------------------------------------
     * pack send buffers
     *--------------------------------------------------------------------*/
+
+#if BOXLOOP_VER==5
+   extern int gteam_size;
+   custom_parallel_for(0, num_sends, [&](int i)
+#else
 #ifdef HYPRE_USING_OPENMP
 #pragma omp parallel for
 #endif
    for (int i = 0; i < num_sends; i++)
+#endif
    {
 	  hypre_CommType      *comm_type;
 	  hypre_CommEntryType *comm_entry;
@@ -1199,6 +1206,9 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
          }
       }
    }
+#if BOXLOOP_VER==5
+   , gteam_size );
+#endif
 
    /* Copy buffer data from Device to Host */
    if (num_sends > 0 && alloc_dev_buffer)
@@ -1244,6 +1254,11 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
 
    int real_rank;
    MPI_Comm_rank(MPI_COMM_WORLD, &real_rank);	//this will give real rank, not fake rank manipulated in mpistubs.c
+
+   extern __thread double _hypre_comm_time;
+
+   struct timeval  tv1, tv2;
+   gettimeofday(&tv1, NULL);
 
 
    omp_set_lock(const_cast<omp_lock_t*>(&g_comm_array[g_thread_id].mutex));
@@ -1326,6 +1341,9 @@ hypre_InitializeCommunication( hypre_CommPkg     *comm_pkg,
 	  }
 
    }
+
+   gettimeofday(&tv2, NULL);
+   _hypre_comm_time += (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 + (double) (tv2.tv_sec - tv1.tv_sec);
 
    //printf("back to thread\n");
 #else
@@ -1472,13 +1490,15 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
 
 #ifdef USE_FUNNELLED_COMM
 
+      extern __thread double _hypre_comm_time;
+
 	  struct timeval  tv1, tv2;
-//	  gettimeofday(&tv1, NULL);
+	  gettimeofday(&tv1, NULL);
 
 	  while(g_comm_array[g_thread_id].req_status != 2){asm("pause");}
 
-//	  gettimeofday(&tv2, NULL);
-//	  hypre_comm_time += (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 + (double) (tv2.tv_sec - tv1.tv_sec);
+	  gettimeofday(&tv2, NULL);
+	  _hypre_comm_time += (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 + (double) (tv2.tv_sec - tv1.tv_sec);
 
 
 
@@ -1576,10 +1596,15 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
                      HYPRE_MEMORY_DEVICE, HYPRE_MEMORY_HOST );
    }
 
+#if BOXLOOP_VER==5
+   extern int gteam_size;
+   custom_parallel_for(0, num_recvs, [&](int i)
+#else
 #ifdef HYPRE_USING_OPENMP
 #pragma omp parallel for
 #endif
    for (int i = 0; i < num_recvs; i++)
+#endif
    {
 	  hypre_CommType      *comm_type;
 	  hypre_CommEntryType *comm_entry;
@@ -1671,6 +1696,9 @@ hypre_FinalizeCommunication( hypre_CommHandle *comm_handle )
       }
    }
 
+#if BOXLOOP_VER==5
+   , gteam_size );
+#endif
    /*--------------------------------------------------------------------
     * turn off first communication indicator
     *--------------------------------------------------------------------*/
@@ -1751,10 +1779,15 @@ hypre_ExchangeLocalData( hypre_CommPkg *comm_pkg,
    copy_fr_type = hypre_CommPkgCopyFromType(comm_pkg);
    copy_to_type = hypre_CommPkgCopyToType(comm_pkg);
 
+#if BOXLOOP_VER==5
+   extern int gteam_size;
+   custom_parallel_for(0, hypre_CommTypeNumEntries(copy_fr_type), [&](int i)
+#else
 #ifdef HYPRE_USING_OPENMP
 #pragma omp parallel for
 #endif
    for (int i = 0; i < hypre_CommTypeNumEntries(copy_fr_type); i++)
+#endif
    {
 	  hypre_CommEntryType *copy_fr_entry = hypre_CommTypeEntry(copy_fr_type, i);
 	  hypre_CommEntryType *copy_to_entry = hypre_CommTypeEntry(copy_to_type, i);
@@ -1841,6 +1874,9 @@ hypre_ExchangeLocalData( hypre_CommPkg *comm_pkg,
          }
       }
    }
+#if BOXLOOP_VER==5
+   , gteam_size );
+#endif
 
    return hypre_error_flag;
 }

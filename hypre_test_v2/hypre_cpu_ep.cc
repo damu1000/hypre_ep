@@ -585,7 +585,7 @@ int main(int argc1, char **argv1)
 				int cpu = rank * num_of_threads * input.team_size + teamid * input.team_size + threadid;
 //				set_affinity(cpu);
 				int cpu_affinity = get_affinity();
-				printf("rank %d team %d thread %d actual_affinity %d\n",rank, teamid, threadid, cpu_affinity);
+				//printf("rank %d team %d thread %d actual_affinity %d\n",rank, teamid, threadid, cpu_affinity);
 			}
 
 
@@ -594,7 +594,7 @@ int main(int argc1, char **argv1)
 //				set_affinity(rank * num_of_threads * input.team_size + 16);
 				int cpu_affinity = get_affinity();
 				int threadid = 0;
-				printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
+				//printf("rank %d team %d thread %d cpu %d\n",rank, teamid, threadid, cpu_affinity);
 			}
 
 			/*int device_id=-1;
