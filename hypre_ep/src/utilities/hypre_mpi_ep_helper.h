@@ -12,7 +12,7 @@
 /*do not define USE_FUNNELLED_COMM here. use -DUSE_FUNNELLED_COMM compiler option instead*/
 //#define USE_MULTIPLE_COMMS
 //#define USE_ODD_EVEN_COMMS
-//#define USE_TAG_PAR_COMM /* either TAG_PAR_COMM or MULTIPLE_COMMS but not both */
+#define USE_TAG_PAR_COMM /* either TAG_PAR_COMM or MULTIPLE_COMMS but not both */
 
 #if defined(USE_TAG_PAR_COMM) && defined(USE_MULTIPLE_COMMS)
 #error "Define either USE_MULTIPLE_COMMS or USE_TAG_PAR_COMM, but not both."
@@ -551,7 +551,7 @@ void hypre_set_num_threads(int n, int team_size, int (*f)())	//call from master 
         sprintf(num_vcis, "%d", g_num_of_threads);
         MPI_Info_set(info, "mpi_num_vcis", num_vcis); // number of VCIs to allocate to this communicator
         MPI_Info_set(info, "mpi_assert_tag_based_parallelism", "true"); // tag-based parallelism possible
-        MPI_Info_set(info, "mpi_num_tag_bits_for_vci", "5"); // number of bits in the MPI tag to use for VCI selection TODO: generalize to input from HYPRE_TAG
+        MPI_Info_set(info, "mpi_num_tag_bits_for_vci", "6"); // number of bits in the MPI tag to use for VCI selection TODO: generalize to input from HYPRE_TAG
         MPI_Info_set(info, "mpi_num_tag_bits_for_app", "12"); // number of bits in the MPI tag for the app TODO: generalize to input from HYPRE_TAG
 
         MPI_Comm_dup_with_info(MPI_COMM_WORLD, info, &tag_par_comm);
