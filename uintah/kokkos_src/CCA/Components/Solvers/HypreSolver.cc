@@ -252,60 +252,7 @@ namespace Uintah {
 		}
 #endif
 
-
-
-
-		int curr_threads = omp_get_max_threads();
-    	omp_set_num_threads(2);
-    #pragma omp parallel sections num_threads(2)
-    	{
-
-    #pragma omp section
-    		{
-    			int flag;
-    			MPI_Is_thread_main( &flag );
-
-    			if(flag)	// main thread should call hypre_solve and worker should init further worker threads. This main thread to act as master thread for funneled comm
-    			{
-    				//printf("main thread waiting for init\n");
-    				wait_for_init(m_hypre_num_of_threads, m_partition_size, comm_affinity, g_nodal_rank);
-    				//printf("calling Hypre solve \n");
-    				HypreSolve(pg, ps, matls, old_dw, new_dw, stencil);
-    				destroy();
-    			}
-    			else
-    			{
-    				//printf("worker thread init\n");
-    				thread_init(m_hypre_num_of_threads, m_partition_size, affinity, g_nodal_rank);
-    			}
-
-    		}
-
-    #pragma omp section
-    		{
-    			int flag;
-    			MPI_Is_thread_main( &flag );
-
-    			if(flag)	// main thread should call hypre_solve and worker should init further worker threads. This main thread to act as master thread for funneled comm
-    			{
-    				//printf("main thread waiting for init\n");
-    				wait_for_init(m_hypre_num_of_threads, m_partition_size, comm_affinity, g_nodal_rank);
-    				//printf("calling Hypre solve \n");
-    				HypreSolve(pg, ps, matls, old_dw, new_dw, stencil);
-    				destroy();
-    			}
-    			else
-    			{
-    				//printf("worker thread init\n");
-    				thread_init(m_hypre_num_of_threads, m_partition_size, affinity, g_nodal_rank);
-    			}
-
-    		}
-
-
-    	}
-    	//printf("omp section end\n");
-    	omp_set_num_threads(curr_threads);
+		HypreSolve(pg, ps, matls, old_dw, new_dw, stencil, affinity, g_nodal_rank);
 
     }
 
@@ -314,7 +261,9 @@ namespace Uintah {
                    const MaterialSubset* matls,
                    DataWarehouse* old_dw,
                    DataWarehouse* new_dw,
-                   Handle<HypreStencil7<Types> >)
+                   Handle<HypreStencil7<Types> >,
+				   int *affinity,
+				   int g_nodal_rank)
     {
 
     	//create patch subsets equal to number of partitions. in case of scheduler other than kokkos omp, all patches will be in a same patch subset - same as before
@@ -391,10 +340,12 @@ namespace Uintah {
 
 #ifdef FUNNELED_COMM
 	//for(int t = 0; t < hypre_num_of_threads+1; t++)
-	custom_partition_master(0, m_hypre_num_of_threads+1, [&](int t)
+//	custom_partition_master(0, m_hypre_num_of_threads+1, [&](int t)
+    custom_partition_master(m_hypre_num_of_threads+1, m_partition_size, affinity, g_nodal_rank, [&](int t)
 #else
 	//for(int t = 0; t < hypre_num_of_threads; t++)
-	custom_partition_master(0, m_hypre_num_of_threads, [&](int t)
+//	custom_partition_master(0, m_hypre_num_of_threads, [&](int t)
+    custom_partition_master(m_hypre_num_of_threads, m_partition_size, affinity, g_nodal_rank, [&](int t)
 #endif
 //#pragma omp parallel for num_threads(num_threads) schedule(static, 1)
     	//for(int part_id = 0; part_id < num_threads; part_id++)	//iterate over number of partitions

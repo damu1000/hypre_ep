@@ -913,7 +913,7 @@ SimulationController::ReportStats( bool header /* = false */ )
 
             << "Wall Time=" << setw(10) << walltimers.GetWallTime()
             // << "All Time steps= " << setw(12) << walltimers.TimeStep().seconds()
-            // << "Current Time Step= " << setw(12) << timeStep.seconds()
+            << "Current Time Step= " << setw(12) << timeStep.seconds()
             << "EMA="        << setw(12) << walltimers.ExpMovingAverage().seconds()
             // << "In-situ Time = " << setw(12) << walltimers.InSitu().seconds()
       ;

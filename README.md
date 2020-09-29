@@ -94,3 +94,93 @@ Enable/disable following optimizations.
 - Vectorization: Enable vectorization of few key kernels (which is not done by default): Add "-DUSE_SIMD" to CFLAGS and CXXFLAGS. Do this as the last optimization while checking incremental performance of different optimizations. Depending on problem size and communication pattern vectorization can give upto 20% speed-up on KNL. (Of corse the same can be done on CPU only version also)
 
 
+
+
+
+## Install Uintah:
+
+*** Do not get confused with the directory name kokkos_src. It is Uintah source code. Named kokkos_src by mistake. ***
+
+cd uintah
+
+mkdir work_dir
+
+### Install cpu version
+
+mkdir 1_cpu
+
+cd 1_cpu
+
+../kokkos_src_original/configure --enable-64bit --enable-optimize="-std=c++11 -O2 -g -fp-model precise -xMIC-AVX512" --enable-assertion-level=0 --with-mpi=built-in --with-hypre=../../hypre_cpu/src/build/ CC=mpiicc CXX=mpiicpc F77=ifort --no-create --no-recursion
+
+make -j32 sus
+
+cp ./StandAlone/sus ../work_dir/1_cpu
+
+
+### Install kokkos OpenMP
+
+// warning: the kokkos installation script is not tested with the latest version, but should work.
+
+git clone https://github.com/kokkos/kokkos.git
+
+cd kokkos
+
+mkdir build
+
+cd build
+
+// --with-hwloc is optional. Provid if hwloc is available
+
+../generate_makefile.bash --kokkos-disable-warnings --prefix=`pwd` --kokkos-path=../ --with-openmp --with-serial --with-options=disable_profiling --arch=KNL --with-hwloc=$HOME/installs/hwloc/install
+
+make 
+
+make install
+
+### Install EP version
+
+cd ..
+
+mkdir 2_ep
+
+cd 2_ep
+
+//Provide kokkos path of earlier installation. "-L$HOME/installs/hwloc/install/lib -lhwloc -ldl" is optional. Provide if given during kokkos installation 
+
+../kokkos_src/configure --enable-64bit --enable-optimize="-std=c++11 -O2 -g -fp-model precise -xMIC-AVX512" --enable-assertion-level=0 --with-mpi=built-in --with-hypre=../../hypre_ep/src/build/ LDFLAGS="-L$HOME/installs/kokkos-knl/build/kokkos/lib -lkokkos -L$HOME/installs/hwloc/install/lib -lhwloc -ldl" CXXFLAGS="-I$HOME/installs/kokkos-knl/build/kokkos/include -DUINTAH_ENABLE_KOKKOS -I../../hypre_ep/src/"
+
+make -j32 sus
+
+cp ./StandAlone/sus ../work_dir/2_ep
+
+
+### to clean Uintah installations:
+
+make clean
+
+make cleanreally
+
+make reallyclean
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
