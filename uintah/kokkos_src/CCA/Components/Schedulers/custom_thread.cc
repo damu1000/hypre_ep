@@ -61,7 +61,8 @@ typedef struct thread_team
 	volatile int m_end;	//beginning of team loop.	//size 4 bytes
 	std::atomic<int> m_completed{0};	//size 4 bytes
 	volatile int m_num_of_calls{0};		//size 4 bytes
-	char dummy[16];
+	volatile int m_active_threads{0};		//size 4 bytes
+	char dummy[12];
 
 } thread_team;
 
@@ -145,17 +146,19 @@ void team_worker(int team_id, int thread_id)
 				{
 					num_of_calls++;
 					//printf("%d worker %d-%d\n",rank, team_id, thread_id);
-					int e = my_team->m_end;
-					int chunk = e - my_team->m_begin;
-					chunk = chunk / l2 / 2;
-					chunk = std::max(chunk, 1);
-					int b;
-					while((b = my_team->m_begin.fetch_add(chunk, std::memory_order_seq_cst))< e)
-					{
-						int b_next = std::min(e, b+chunk);
-						for(; b<b_next; b++)
+					if(thread_id < my_team->m_active_threads){
+						int e = my_team->m_end;
+						int chunk = e - my_team->m_begin;
+						chunk = chunk / l2 / 2;
+						chunk = std::max(chunk, 1);
+						int b;
+						while((b = my_team->m_begin.fetch_add(chunk, std::memory_order_seq_cst))< e)
 						{
-							my_team->m_fun(b);
+							int b_next = std::min(e, b+chunk);
+							for(; b<b_next; b++)
+							{
+								my_team->m_fun(b);
+							}
 						}
 					}
 					my_team->m_completed++;
@@ -273,10 +276,10 @@ void destroy()
 }
 
 int g_rank_temp;
-void custom_parallel_for(int s, int e, std::function<void(int)> f)
+void custom_parallel_for(int s, int e, std::function<void(int)> f, int active_threads)
 {
 	thread_team *my_team = &g_team[cust_g_team_id];
-
+	my_team->m_active_threads = active_threads;
 	my_team->m_fun = f;
 	my_team->m_end = e;
 	my_team->m_begin = s;
@@ -315,14 +318,14 @@ void custom_parallel_for(int s, int e, std::function<void(int)> f)
 
 double parallel_time = 0.0;
 
-void cparallel_for(int b, int e, void(*f)(int))
-{
-	//auto start = std::chrono::system_clock::now();
-	custom_parallel_for(b, e, f);
-	/*auto end = std::chrono::system_clock::now();
-	std::chrono::duration<double> elapsed_seconds = end-start;
-	parallel_time += elapsed_seconds.count();*/
-}
+//void cparallel_for(int b, int e, void(*f)(int))
+//{
+//	//auto start = std::chrono::system_clock::now();
+//	custom_parallel_for(b, e, f);
+//	/*auto end = std::chrono::system_clock::now();
+//	std::chrono::duration<double> elapsed_seconds = end-start;
+//	parallel_time += elapsed_seconds.count();*/
+//}
 
 void custom_partition_master(int b, int e, std::function<void(int)> f)
 {
@@ -355,9 +358,9 @@ void custom_partition_master(int b, int e, std::function<void(int)> f)
 	//printf("completed custom_partition_master %d\n",g_num_of_calls.load(std::memory_order_seq_cst));
 }
 
-void ccustom_partition_master(int b, int e, void(*f)(int))
-{
-	custom_partition_master(b, e, f);
-}
+//void ccustom_partition_master(int b, int e, void(*f)(int))
+//{
+//	custom_partition_master(b, e, f);
+//}
 
 

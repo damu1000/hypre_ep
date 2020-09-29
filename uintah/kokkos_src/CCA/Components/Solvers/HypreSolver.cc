@@ -74,6 +74,11 @@ __itt_string_handle* shMyTask = __itt_string_handle_create("HypreSolve");
 #endif
 #endif
 
+__thread int do_setup=1;
+extern thread_local double _hypre_comm_time;
+thread_local size_t g_hypre_buff_size{0};
+thread_local double *g_hypre_buff;
+
 using namespace std;
 using namespace Uintah;
 
@@ -154,6 +159,31 @@ namespace Uintah {
     }
 
     //---------------------------------------------------------------------------------------------
+
+    double * getBuffer( size_t buff_size )
+    {
+      if (g_hypre_buff_size < buff_size) {
+        g_hypre_buff_size = buff_size;
+
+#if defined(HYPRE_USING_CUDA) || (defined(HYPRE_USING_KOKKOS) && defined(KOKKOS_ENABLE_CUDA))
+        if (g_hypre_buff) {
+          cudaErrorCheck(cudaFree((void*)g_hypre_buff));
+        }
+
+        cudaErrorCheck(cudaMalloc((void**)&g_hypre_buff, buff_size));
+#else
+        if (g_hypre_buff) {
+          free(g_hypre_buff);
+        }
+
+        g_hypre_buff = (double *)malloc(buff_size);
+#endif
+      }
+
+      return g_hypre_buff; // although g_hypre_buff is a member of the class and can be accessed inside task, it can not be directly
+                     // accessed inside parallel_for on device (even though its a device pointer, value is not passed by reference)
+                     // So return explicitly to a local variable. The local variable gets passed by copy.
+    }
 
     void solve(const ProcessorGroup* pg, 
                const PatchSubset* ps,
@@ -354,11 +384,11 @@ namespace Uintah {
 	  guess_dw = new_dw->getOtherDataWarehouse(which_guess_dw);
 
 	  int num_threads = std::min(m_hypre_num_of_threads, ps->size());
-      hypre_set_num_threads(m_hypre_num_of_threads, get_custom_team_id);
+      hypre_set_num_threads(m_hypre_num_of_threads, m_partition_size, get_custom_team_id);
 
       double hypre_avg_comm_time=0.0;
       std::atomic<int> hypre_comm_threads_added{0};
-      //printf("calling parition master\n");
+
 #ifdef FUNNELED_COMM
 	//for(int t = 0; t < hypre_num_of_threads+1; t++)
 	custom_partition_master(0, m_hypre_num_of_threads+1, [&](int t)
@@ -371,30 +401,13 @@ namespace Uintah {
     	{
 		//printf("calling hypre_init_thread\n");
     	int thread_id = hypre_init_thread();
-    	//printf("hypre_init_thread id:%d\n",thread_id);
-  		int flag=0;
 
-#ifdef FUNNELED_COMM
-  		MPI_Is_thread_main( &flag );
-#endif
-
-  		if(!flag)	//main thread manages comm, others execute hypre code.
+  		if(thread_id>=0)	//main thread manages comm, others execute hypre code.
   		{
-  			//printf("if not flag\n");
-  			//omp_set_num_threads(m_partition_size);
-
-    		//int thread_id = omp_get_thread_num();
     		int part_id = thread_id;
-    		hypre_comm_time = 0;	//defined in mpistubs.c. Used in strct_communication.c, mpistubs.c and printed in HypreSolve.cc (Uintah) for every timestep
+    		_hypre_comm_time = 0;	//defined in mpistubs.c. Used in strct_communication.c, mpistubs.c and printed in HypreSolve.cc (Uintah) for every timestep
 
-
-
-
-    		//
-    		//if(omp_get_thread_num()==0)
-    		//	printf("number of threads: %d, available threads: %d\n", omp_get_num_threads(), omp_get_max_threads());
     		const PatchSubset * patches = dynamic_cast<const PatchSubset*>(new_patches[part_id]);
-	
 
 		  //________________________________________________________
 		  // Matrix setup frequency - this will destroy and recreate a new Hypre matrix at the specified setupFrequency
@@ -402,11 +415,11 @@ namespace Uintah {
 		  bool mod_setup = true;
 		  if (suFreq != 0)
 			mod_setup = (timestep % suFreq);
-		  bool do_setup = ((timestep == 1) || ! mod_setup);
+		  do_setup =  ((timestep == 1) || ! mod_setup) ? 1 : 0;
 
 		  // always setup on first pass through
 		  if( firstPassThrough_){
-			do_setup = true;
+			do_setup = 1;
 			if(thread_id==0)
 				firstPassThrough_ = false;
 		  }
@@ -436,7 +449,6 @@ namespace Uintah {
 
 		  }
 		  else {
-
 			SoleVariable<hypre_solver_structP> hypre_solverP_;
 			hypre_solver_struct* hypre_solver_ = scinew hypre_solver_struct;
 
@@ -474,9 +486,7 @@ namespace Uintah {
 			//__________________________________
 			// Setup grid
 			HYPRE_StructGrid grid;
-			if (timestep == 1 || do_setup || restart) {
-
-				//std::cout << "damu 1\n";
+			if (timestep == 1 || do_setup==1 || restart) {
 
 			  HYPRE_StructGridCreate(pg->getComm(), 3, &grid);
 
@@ -492,7 +502,6 @@ namespace Uintah {
 				  l = patch->getLowIndex(basis);
 				  h1 = patch->getHighIndex(basis)-IntVector(1,1,1);
 				}
-				//std::cout << "damu 2\n";
 				HYPRE_StructGridSetExtents(grid, l.get_pointer(), h1.get_pointer());
 			  }
 
@@ -509,9 +518,7 @@ namespace Uintah {
 			  periodic[0] = periodic_vector.x() * range.x();
 			  periodic[1] = periodic_vector.y() * range.y();
 			  periodic[2] = periodic_vector.z() * range.z();
-			  //std::cout << "damu 3\n";
 			  HYPRE_StructGridSetPeriodic(grid, periodic);
-			  //std::cout << "damu 4\n";
 			  // Assemble the grid
 			  HYPRE_StructGridAssemble(grid);
 			}
@@ -519,21 +526,18 @@ namespace Uintah {
 			//__________________________________
 			// Create the stencil
 			HYPRE_StructStencil stencil;
-			if ( timestep == 1 || do_setup || restart) {
+			if ( timestep == 1 || do_setup==1 || restart) {
 			  if(params->getSymmetric()){
-				  //std::cout << "damu 5\n";
 				HYPRE_StructStencilCreate(3, 4, &stencil);
 				int offsets[4][3] = {{0,0,0},
 				  {-1,0,0},
 				  {0,-1,0},
 				  {0,0,-1}};
 				for(int i=0;i<4;i++) {
-					//std::cout << "damu 6\n";
 				  HYPRE_StructStencilSetElement(stencil, i, offsets[i]);
 				}
 
 			  } else {
-				  //std::cout << "damu 7\n";
 				HYPRE_StructStencilCreate(3, 7, &stencil);
 				int offsets[7][3] = {{0,0,0},
 				  {1,0,0}, {-1,0,0},
@@ -541,7 +545,6 @@ namespace Uintah {
 				  {0,0,1}, {0,0,-1}};
 
 				for(int i=0;i<7;i++){
-					//std::cout << "damu 8\n";
 				  HYPRE_StructStencilSetElement(stencil, i, offsets[i]);
 				}
 			  }
@@ -552,31 +555,22 @@ namespace Uintah {
 			HYPRE_StructMatrix* HA = hypre_solver_s->HA;
 
 			if (timestep == 1 || restart) {
-				//std::cout << "damu 9\n";
 			  HYPRE_StructMatrixCreate(pg->getComm(), grid, stencil, HA);
-			  //std::cout << "damu 10\n";
 			  HYPRE_StructMatrixSetSymmetric(*HA, params->getSymmetric());
 			  int ghost[] = {1,1,1,1,1,1};
-			  //std::cout << "damu 11\n";
 			  HYPRE_StructMatrixSetNumGhost(*HA, ghost);
-			  //std::cout << "damu 12\n";
 			  HYPRE_StructMatrixInitialize(*HA);
-			} else if (do_setup) {
-				//std::cout << "damu 13\n";
+			} else if (do_setup==1) {
 			  HYPRE_StructMatrixDestroy(*HA);
-			  //std::cout << "damu 14\n";
 			  HYPRE_StructMatrixCreate(pg->getComm(), grid, stencil, HA);
-			  //std::cout << "damu 15\n";
 			  HYPRE_StructMatrixSetSymmetric(*HA, params->getSymmetric());
 			  int ghost[] = {1,1,1,1,1,1};
-			  //std::cout << "damu 16\n";
 			  HYPRE_StructMatrixSetNumGhost(*HA, ghost);
-			  //std::cout << "damu 17\n";
 			  HYPRE_StructMatrixInitialize(*HA);
 			}
 
 			// setup the coefficient matrix ONLY on the first timestep, if we are doing a restart, or if we set setupFrequency != 0, or if UpdateCoefFrequency != 0
-			if (timestep == 1 || restart || do_setup || updateCoefs) {
+			if (timestep == 1 || restart || do_setup==1 || updateCoefs) {
 			  for(int p=0;p<patches->size();p++) {
 				const Patch* patch = patches->get(p);
 				printTask( patches, patch, cout_doing, "HypreSolver:solve: Create Matrix" );
@@ -600,109 +594,81 @@ namespace Uintah {
 				  h = patch->getHighIndex(basis);
 				}
 
+	            IntVector hh(h.x()-1, h.y()-1, h.z()-1);
+	            int stencil_point = ( params->getSymmetric()) ? 4 : 7;
+	            unsigned long Nx = abs(h.x()-l.x()), Ny = abs(h.y()-l.y()), Nz = abs(h.z()-l.z());
+	            int start_offset = l.x() + l.y()*Nx + l.z()*Nx*Ny; //ensure starting point is 0 while indexing d_buff
+	            size_t buff_size = Nx*Ny*Nz*sizeof(double)*stencil_point;
+	            double * d_buff = getBuffer( buff_size );	//allocate / reallocate d_buff;
+	            int stencil_indices[] = {0,1,2,3,4,5,6};
+
 				//__________________________________
 				// Feed it to Hypre
-				if(params->getSymmetric()){
+	            if( params->getSymmetric()){
 
-				  double* values = scinew double[(h.x()-l.x())*4*m_partition_size];
-				  int stencil_indices[] = {0,1,2,3};
+	              // use stencil4 as coefficient matrix. NOTE: This should be templated
+	              // on the stencil type. This workaround is to get things moving
+	              // until we convince component developers to move to stencil4. You must
+	              // set m_params->setUseStencil4(true) when you setup your linear solver
+	              // if you want to use stencil4. You must also provide a matrix of type
+	              // stencil4 otherwise this will crash.
+	              if ( params->getUseStencil4()) {
 
-
-				  // use stencil4 as coefficient matrix. NOTE: This should be templated
-				  // on the stencil type. This workaround is to get things moving
-				  // until we convince component developers to move to stencil4. You must
-				  // set params->setUseStencil4(true) when you setup your linear solver
-				  // if you want to use stencil4. You must also provide a matrix of type
-				  // stencil4 otherwise this will crash.
-				  if (params->getUseStencil4()) {
-
-					//for(int z=l.z();z<h.z();z++){
-					 custom_parallel_for(l.z(), h.z(), [&](int z){
-					  for(int y=l.y();y<h.y();y++){
-
-						const Stencil4* AA = &AStencil4[IntVector(l.x(), y, z)];
-						double* p = &values[(h.x()-l.x())*4*cust_g_thread_id];
-
-						for(int x=l.x();x<h.x();x++){
-						  *p++ = AA->p;
-						  *p++ = AA->w;
-						  *p++ = AA->s;
-						  *p++ = AA->b;
-						  AA++;
+					 custom_parallel_for(l.z(), h.z(), [&](int k){
+					  for(int j=l.y();j<h.y();j++){
+						for(int i=l.x();i<h.x();i++){
+						  int id = (i + j*Nx + k*Nx*Ny - start_offset)*stencil_point;
+						  d_buff[id + 0] = AStencil4(i, j, k).p;
+						  d_buff[id + 1] = AStencil4(i, j, k).w;
+						  d_buff[id + 2] = AStencil4(i, j, k).s;
+						  d_buff[id + 3] = AStencil4(i, j, k).b;
 						}
-						IntVector ll(l.x(), y, z);
-						IntVector hh(h.x()-1, y, z);
-						//std::cout << "damu 18\n";
-						HYPRE_StructMatrixSetBoxValues(*HA,
-													   ll.get_pointer(), hh.get_pointer(),
-													   4, stencil_indices, &values[(h.x()-l.x())*4*cust_g_thread_id]);
-
 					  } // y loop
-					});  // z loop
+					}, m_partition_size);  // z loop
 
-				  } else { // use stencil7
+	              } else { // use stencil7
 
-					//for(int z=l.z();z<h.z();z++){
-					  custom_parallel_for(l.z(), h.z(), [&](int z){
-					  for(int y=l.y();y<h.y();y++){
+	            	  custom_parallel_for(l.z(), h.z(), [&](int k){
+	            		for(int j=l.y();j<h.y();j++){
+	            		  for(int i=l.x();i<h.x();i++){
+	            		    int id = (i + j*Nx + k*Nx*Ny - start_offset)*stencil_point;
+	            			  d_buff[id + 0] = A(i, j, k).p;
+	            			  d_buff[id + 1] = A(i, j, k).w;
+	            			  d_buff[id + 2] = A(i, j, k).s;
+	            			  d_buff[id + 3] = A(i, j, k).b;
 
-						const Stencil7* AA = &A[IntVector(l.x(), y, z)];
-						double* p = &values[(h.x()-l.x())*4*cust_g_thread_id];
+	            			}
+	            		} // y loop
+	            	  }, m_partition_size);  // z loop
 
-						for(int x=l.x();x<h.x();x++){
-						  *p++ = AA->p;
-						  *p++ = AA->w;
-						  *p++ = AA->s;
-						  *p++ = AA->b;
-						  AA++;
-						}
-						IntVector ll(l.x(), y, z);
-						IntVector hh(h.x()-1, y, z);
-						//std::cout << "damu 19\n";
-						HYPRE_StructMatrixSetBoxValues(*HA,
-													   ll.get_pointer(), hh.get_pointer(),
-													   4, stencil_indices, &values[(h.x()-l.x())*4*cust_g_thread_id]);
+	              }
+	            } else { // if( m_params->getSymmetric())
 
-					  } // y loop
-					});  // z loop
-				  }
-				  delete[] values;
-				} else {
-				  double* values = scinew double[(h.x()-l.x())*7*m_partition_size];
-				  int stencil_indices[] = {0,1,2,3,4,5,6};
+				   custom_parallel_for(l.z(), h.z(), [&](int k){
+				    for(int j=l.y();j<h.y();j++){
+					  for(int i=l.x();i<h.x();i++){
+	                  int id = (i + j*Nx + k*Nx*Ny - start_offset)*stencil_point;
+	                  d_buff[id + 0] = A(i, j, k).p;
+	                  d_buff[id + 1] = A(i, j, k).e;
+	                  d_buff[id + 2] = A(i, j, k).w;
+	                  d_buff[id + 3] = A(i, j, k).n;
+	                  d_buff[id + 4] = A(i, j, k).s;
+	                  d_buff[id + 5] = A(i, j, k).t;
+	                  d_buff[id + 6] = A(i, j, k).b;
 
-				  //for(int z=l.z();z<h.z();z++){
-				  custom_parallel_for(l.z(), h.z(), [&](int z){
-					for(int y=l.y();y<h.y();y++){
-
-					  const Stencil7* AA = &A[IntVector(l.x(), y, z)];
-					  double* p = &values[(h.x()-l.x())*7*cust_g_thread_id];
-
-					  for(int x=l.x();x<h.x();x++){
-						*p++ = AA->p;
-						*p++ = AA->e;
-						*p++ = AA->w;
-						*p++ = AA->n;
-						*p++ = AA->s;
-						*p++ = AA->t;
-						*p++ = AA->b;
-						AA++;
 					  }
+				    } // y loop
+				  }, m_partition_size);  // z loop
 
-					  IntVector ll(l.x(), y, z);
-					  IntVector hh(h.x()-1, y, z);
-					  //std::cout << "damu 20\n";
-					  HYPRE_StructMatrixSetBoxValues(*HA,
-													 ll.get_pointer(), hh.get_pointer(),
-													 7, stencil_indices,
-													 &values[(h.x()-l.x())*7*cust_g_thread_id]);
-					}  // y loop
-				  }); // z loop
-				  delete[] values;
-				}
+	            }
+
+	            HYPRE_StructMatrixSetBoxValues(*HA,
+	                                           l.get_pointer(), hh.get_pointer(),
+	                                           stencil_point, stencil_indices,
+	                                           d_buff);
+
 			  }
-			  if (timestep == 1 || restart || do_setup) {
-				  //std::cout << "damu 21\n";
+			  if (timestep == 1 || restart || do_setup==1) {
 				  HYPRE_StructMatrixAssemble(*HA);
 			  }
 			}
@@ -712,16 +678,11 @@ namespace Uintah {
 			HYPRE_StructVector* HB = hypre_solver_s->HB;
 
 			if (timestep == 1 || restart) {
-				//std::cout << "damu 22\n";
 			  HYPRE_StructVectorCreate(pg->getComm(), grid, HB);
-			  //std::cout << "damu \n";
 			  HYPRE_StructVectorInitialize(*HB);
 			} else if (do_setup) {
-				//std::cout << "damu 23\n";
 			  HYPRE_StructVectorDestroy(*HB);
-			  //std::cout << "damu 24\n";
 			  HYPRE_StructVectorCreate(pg->getComm(), grid, HB);
-			  //std::cout << "damu 25\n";
 			  HYPRE_StructVectorInitialize(*HB);
 			}
 
@@ -747,39 +708,42 @@ namespace Uintah {
 
 			  //__________________________________
 			  // Feed it to Hypre
-			  //for(int z=l.z();z<h.z();z++){
-			  custom_parallel_for(l.z(), h.z(), [&](int z){
-				for(int y=l.y();y<h.y();y++){
-				  const double* values = &B[IntVector(l.x(), y, z)];
-				  IntVector ll(l.x(), y, z);
-				  IntVector hh(h.x()-1, y, z);
-				  //std::cout << "damu 26\n";
-				  HYPRE_StructVectorSetBoxValues(*HB,
-												 ll.get_pointer(), hh.get_pointer(),
-												 const_cast<double*>(values));
-				}
-			  });
+
+			  unsigned long Nx = abs(h.x()-l.x()), Ny = abs(h.y()-l.y()), Nz = abs(h.z()-l.z());
+			  int start_offset = l.x() + l.y()*Nx + l.z()*Nx*Ny; //ensure starting point is 0 while indexing d_buff
+			  size_t buff_size = Nx*Ny*Nz*sizeof(double);
+			  double * d_buff = getBuffer( buff_size );	//allocate / reallocate d_buff;
+
+				 custom_parallel_for(l.z(), h.z(), [&](int k){
+				  for(int j=l.y();j<h.y();j++){
+					for(int i=l.x();i<h.x();i++){
+				      int id = (i + j*Nx + k*Nx*Ny - start_offset);
+				      d_buff[id] = B(i, j, k);
+					}
+				  } // y loop
+				}, m_partition_size);  // z loop
+
+			  IntVector hh(h.x()-1, h.y()-1, h.z()-1);
+			  HYPRE_StructVectorSetBoxValues( *HB,
+											 l.get_pointer(), hh.get_pointer(),
+											 d_buff);
+
 			}
 			if (timestep == 1 || restart || do_setup) {
-				//std::cout << "damu 27\n";
 				HYPRE_StructVectorAssemble(*HB);
 			}
+
 
 			//__________________________________
 			// Create the solution vector
 			HYPRE_StructVector* HX = hypre_solver_s->HX;
 
 			if (timestep == 1 || restart) {
-				//std::cout << "damu 28\n";
 			  HYPRE_StructVectorCreate(pg->getComm(), grid, HX);
-			  //std::cout << "damu 29\n";
 			  HYPRE_StructVectorInitialize(*HX);
 			} else if (do_setup) {
-				//std::cout << "damu 30\n";
 			  HYPRE_StructVectorDestroy(*HX);
-			  //std::cout << "damu 31\n";
 			  HYPRE_StructVectorCreate(pg->getComm(), grid, HX);
-			  //std::cout << "damu 32\n";
 			  HYPRE_StructVectorInitialize(*HX);
 			}
 
@@ -807,24 +771,34 @@ namespace Uintah {
 
 				//__________________________________
 				// Feed it to Hypre
-				//for(int z=l.z();z<h.z();z++){
-				custom_parallel_for(l.z(), h.z(), [&](int z){
-				  for(int y=l.y();y<h.y();y++){
-					const double* values = &X[IntVector(l.x(), y, z)];
-					IntVector ll(l.x(), y, z);
-					IntVector hh(h.x()-1, y, z);
-					//std::cout << "damu 33\n";
-					HYPRE_StructVectorSetBoxValues(*HX,
-												   ll.get_pointer(), hh.get_pointer(),
-												   const_cast<double*>(values));
-				  }
-				});
+
+			    IntVector hh(h.x()-1, h.y()-1, h.z()-1);
+
+			    unsigned long Nx = abs(h.x()-l.x()), Ny = abs(h.y()-l.y()), Nz = abs(h.z()-l.z());
+			    int start_offset = l.x() + l.y()*Nx + l.z()*Nx*Ny; //ensure starting point is 0 while indexing d_buff
+			    size_t buff_size = Nx*Ny*Nz*sizeof(double);
+			    double * d_buff = getBuffer( buff_size );	//allocate / reallocate d_buff;
+
+				 custom_parallel_for(l.z(), h.z(), [&](int k){
+				  for(int j=l.y();j<h.y();j++){
+					for(int i=l.x();i<h.x();i++){
+					  int id = (i + j*Nx + k*Nx*Ny - start_offset);
+					  d_buff[id] = X(i, j, k);
+					}
+				  } // y loop
+				  }, m_partition_size);  // z loop
+
+
+			    HYPRE_StructVectorSetBoxValues( *HX,
+					  						   l.get_pointer(), hh.get_pointer(),
+											   d_buff);
+
 			  }  // initialGuess
 			} // patch loop
 			if (timestep == 1 || restart || do_setup) {
-				//std::cout << "damu 34\n";
 				HYPRE_StructVectorAssemble(*HX);
 			}
+
 			hypre_EndTiming(tMatVecSetup_);
 			//__________________________________
 			//  Dynamic tolerances  Arches uses this
@@ -844,42 +818,28 @@ namespace Uintah {
 
 			  HYPRE_StructSolver* solver =  hypre_solver_s->solver;
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu \n";
 				HYPRE_StructSMGCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = smg;
 				hypre_solver_s->created_solver=true;
-			  } else if (do_setup) {
-				  //std::cout << "damu 35\n";
+			  } else if (do_setup==1) {
 				HYPRE_StructSMGDestroy(*solver);
-				//std::cout << "damu \n";
 				HYPRE_StructSMGCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = smg;
 				hypre_solver_s->created_solver=true;
 			  }
-			  //std::cout << "damu 36\n";
 			  HYPRE_StructSMGSetMemoryUse   (*solver,  0);
-			  //std::cout << "damu 37\n";
 			  HYPRE_StructSMGSetMaxIter     (*solver,  params->maxiterations);
-			  //std::cout << "damu 38\n";
 			  HYPRE_StructSMGSetTol         (*solver,  params->tolerance);
-			  //std::cout << "damu 39\n";
 			  HYPRE_StructSMGSetRelChange   (*solver,  0);
-			  //std::cout << "damu 40\n";
 			  HYPRE_StructSMGSetNumPreRelax (*solver,  params->npre);
-			  //std::cout << "damu 41\n";
 			  HYPRE_StructSMGSetNumPostRelax(*solver,  params->npost);
-			  //std::cout << "damu 42\n";
 			  HYPRE_StructSMGSetLogging     (*solver,  params->logging);
 
-			  if (do_setup){
-				  //std::cout << "damu \n";
+			  if (do_setup==1){
 				  HYPRE_StructSMGSetup          (*solver,  *HA, *HB, *HX);
 			  }
-			  //std::cout << "damu 43\n";
 			  HYPRE_StructSMGSolve(*solver, *HA, *HB, *HX);
-			  //std::cout << "damu 44\n";
 			  HYPRE_StructSMGGetNumIterations(*solver, &num_iterations);
-			  //std::cout << "damu 45\n";
 			  HYPRE_StructSMGGetFinalRelativeResidualNorm(*solver, &final_res_norm);
 
 			} else if(params->solvertype == "PFMG" || params->solvertype == "pfmg"){
@@ -887,48 +847,33 @@ namespace Uintah {
 			  HYPRE_StructSolver* solver =  hypre_solver_s->solver;
 
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 46\n";
 				HYPRE_StructPFMGCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = pfmg;
 				hypre_solver_s->created_solver=true;
-			  } else if (do_setup) {
-				  //std::cout << "damu 47\n";
+			  } else if (do_setup==1) {
 				HYPRE_StructPFMGDestroy(*solver);
-				//std::cout << "damu 47.5\n";
 				HYPRE_StructPFMGCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = pfmg;
 				hypre_solver_s->created_solver=true;
 			  }
 
-			  //std::cout << "damu 48\n";
 			  HYPRE_StructPFMGSetMaxIter    (*solver,      params->maxiterations);
-			  //std::cout << "damu 49\n";
 			  HYPRE_StructPFMGSetTol        (*solver,      params->tolerance);
-			  //std::cout << "damu 50\n";
 			  HYPRE_StructPFMGSetRelChange  (*solver,      0);
 
 			  /* weighted Jacobi = 1; red-black GS = 2 */
-			  //std::cout << "damu 51\n";
 			  HYPRE_StructPFMGSetRelaxType   (*solver,  params->relax_type);
-			  //std::cout << "damu 52\n";
 			  HYPRE_StructPFMGSetNumPreRelax (*solver,  params->npre);
-			  //std::cout << "damu 53\n";
 			  HYPRE_StructPFMGSetNumPostRelax(*solver,  params->npost);
-			  //std::cout << "damu 54\n";
 			  HYPRE_StructPFMGSetSkipRelax   (*solver,  params->skip);
-			  //std::cout << "damu 55\n";
 			  HYPRE_StructPFMGSetLogging     (*solver,  params->logging);
 
-			  if (do_setup){
-				  //std::cout << "damu 56\n";
+			  if (do_setup==1){
 				HYPRE_StructPFMGSetup          (*solver,  *HA, *HB,  *HX);
 			  }
 
-			  //std::cout << "damu 57\n";
 			  HYPRE_StructPFMGSolve(*solver, *HA, *HB, *HX);
-			  //std::cout << "damu 58\n";
 			  HYPRE_StructPFMGGetNumIterations(*solver, &num_iterations);
-			  //std::cout << "damu 59\n";
 			  HYPRE_StructPFMGGetFinalRelativeResidualNorm(*solver,
 														   &final_res_norm);
 
@@ -936,47 +881,32 @@ namespace Uintah {
 
 			  HYPRE_StructSolver* solver = hypre_solver_s->solver;
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 60\n";
 				HYPRE_StructSparseMSGCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = sparsemsg;
 				hypre_solver_s->created_solver=true;
-			  } else if (do_setup) {
-				  //std::cout << "damu 61\n";
+			  } else if (do_setup==1) {
 				HYPRE_StructSparseMSGDestroy(*solver);
-				//std::cout << "damu 62\n";
 				HYPRE_StructSparseMSGCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = sparsemsg;
 				hypre_solver_s->created_solver=true;
 			  }
 
-			  //std::cout << "damu 63\n";
 			  HYPRE_StructSparseMSGSetMaxIter  (*solver, params->maxiterations);
-			  //std::cout << "damu 64\n";
 			  HYPRE_StructSparseMSGSetJump     (*solver, params->jump);
-			  //std::cout << "damu \n";
 			  HYPRE_StructSparseMSGSetTol      (*solver, params->tolerance);
-			  //std::cout << "damu 65\n";
 			  HYPRE_StructSparseMSGSetRelChange(*solver, 0);
 
 			  /* weighted Jacobi = 1; red-black GS = 2 */
-			  //std::cout << "damu 66\n";
 			  HYPRE_StructSparseMSGSetRelaxType(*solver,  params->relax_type);
-			  //std::cout << "damu 67\n";
 			  HYPRE_StructSparseMSGSetNumPreRelax(*solver,  params->npre);
-			  //std::cout << "damu 68\n";
 			  HYPRE_StructSparseMSGSetNumPostRelax(*solver,  params->npost);
-			  //std::cout << "damu 69\n";
 			  HYPRE_StructSparseMSGSetLogging(*solver,  params->logging);
-			  if (do_setup){
-				  //std::cout << "damu 70\n";
+			  if (do_setup==1){
 				HYPRE_StructSparseMSGSetup(*solver, *HA, *HB,  *HX);
 			  }
 
-			  //std::cout << "damu 70\n";
 			  HYPRE_StructSparseMSGSolve(*solver, *HA, *HB, *HX);
-			  //std::cout << "damu 71\n";
 			  HYPRE_StructSparseMSGGetNumIterations(*solver, &num_iterations);
-			  //std::cout << "damu 72\n";
 			  HYPRE_StructSparseMSGGetFinalRelativeResidualNorm(*solver,
 																&final_res_norm);
 
@@ -990,28 +920,20 @@ namespace Uintah {
 			  HYPRE_StructSolver* solver =  hypre_solver_s->solver;
 
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 73\n";
 				HYPRE_StructPCGCreate(pg->getComm(),solver);
 				hypre_solver_s->solver_type = pcg;
 				hypre_solver_s->created_solver=true;
-			  } else if (do_setup) {
-				  //std::cout << "damu 74\n";
+			  } else if (do_setup==1) {
 				HYPRE_StructPCGDestroy(*solver);
-				//std::cout << "damu 75\n";
 				HYPRE_StructPCGCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = pcg;
 				hypre_solver_s->created_solver=true;
 			  }
 
-			  //std::cout << "damu 76\n";
 			  HYPRE_StructPCGSetMaxIter(*solver, params->maxiterations);
-			  //std::cout << "damu 77\n";
 			  HYPRE_StructPCGSetTol(*solver, params->tolerance);
-			  //std::cout << "damu 78\n";
 			  HYPRE_StructPCGSetTwoNorm(*solver,  1);
-			  //std::cout << "damu 79\n";
 			  HYPRE_StructPCGSetRelChange(*solver,  0);
-			  //std::cout << "damu 80\n";
 			  HYPRE_StructPCGSetLogging(*solver,  params->logging);
 
 
@@ -1021,49 +943,31 @@ namespace Uintah {
 			  SolverType precond_solver_type;
 
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 81\n";
 				setupPrecond(pg, precond, precond_setup, *precond_solver,
 							 precond_tolerance,precond_solver_type);
 				hypre_solver_s->precond_solver_type = precond_solver_type;
 				hypre_solver_s->created_precond_solver=true;
-				//std::cout << "damu 82\n";
 				HYPRE_StructPCGSetPrecond(*solver, precond,precond_setup,
 										  *precond_solver);
 
-			  } else if (do_setup) {
+			  } else if (do_setup==1) {
 
-				  //std::cout << "damu 83\n";
 				destroyPrecond(*precond_solver);
-				//std::cout << "damu 84\n";
 				setupPrecond(pg, precond, precond_setup, *precond_solver,
 							 precond_tolerance,precond_solver_type);
 				hypre_solver_s->precond_solver_type = precond_solver_type;
 				hypre_solver_s->created_precond_solver=true;
 
-				//std::cout << "damu 85\n";
 				HYPRE_StructPCGSetPrecond(*solver, precond,precond_setup,
 										  *precond_solver);
 			  }
 
 
-			  if (do_setup) {
-				  //std::cout << "damu 86\n";
-			//	  if(omp_get_thread_num()==0) printf("setting up hypre\n");
+			  if (do_setup==1) {
 				HYPRE_StructPCGSetup(*solver, *HA,*HB, *HX);
-			//	if(omp_get_thread_num()==0) printf("setting up hypre complete\n");
-				//std::cout << "damu 86 complete\n";
 			  }
-
-			  //std::cout << "damu 87\n";
-			 // if(omp_get_thread_num()==0) printf("calling hypre solve\n");
-
 			  HYPRE_StructPCGSolve(*solver, *HA, *HB, *HX);
-
-
-			//  if(omp_get_thread_num()==0) printf("calling hypre solve complete\n");
-			  //std::cout << "damu 88\n";
 			  HYPRE_StructPCGGetNumIterations(*solver, &num_iterations);
-			  //std::cout << "damu 89\n";
 			  HYPRE_StructPCGGetFinalRelativeResidualNorm(*solver,&final_res_norm);
 
 			} else if(params->solvertype == "Hybrid"
@@ -1074,32 +978,22 @@ namespace Uintah {
 			  HYPRE_StructSolver* solver =  hypre_solver_s->solver;
 
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 90\n";
 				HYPRE_StructHybridCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = hybrid;
 				hypre_solver_s->created_solver=true;
-			  } else if (do_setup) {
-				  //std::cout << "damu 91\n";
+			  } else if (do_setup==1) {
 				HYPRE_StructHybridDestroy(*solver);
-				//std::cout << "damu 92\n";
 				HYPRE_StructHybridCreate(pg->getComm(), solver);
 				hypre_solver_s->solver_type = hybrid;
 				hypre_solver_s->created_solver=true;
 			  }
 
-			  //std::cout << "damu 93\n";
 			  HYPRE_StructHybridSetDSCGMaxIter(*solver, 100);
-			  //std::cout << "damu 94\n";
 			  HYPRE_StructHybridSetPCGMaxIter(*solver, params->maxiterations);
-			  //std::cout << "damu 95\n";
 			  HYPRE_StructHybridSetTol(*solver, params->tolerance);
-			  //std::cout << "damu 96\n";
 			  HYPRE_StructHybridSetConvergenceTol(*solver, 0.90);
-			  //std::cout << "damu 97\n";
 			  HYPRE_StructHybridSetTwoNorm(*solver, 1);
-			  //std::cout << "damu 98\n";
 			  HYPRE_StructHybridSetRelChange(*solver, 0);
-			  //std::cout << "damu 99\n";
 			  HYPRE_StructHybridSetLogging(*solver, params->logging);
 
 
@@ -1109,43 +1003,33 @@ namespace Uintah {
 			  SolverType precond_solver_type;
 
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 100\n";
 				setupPrecond(pg, precond, precond_setup, *precond_solver,
 							 precond_tolerance,precond_solver_type);
 				hypre_solver_s->precond_solver_type = precond_solver_type;
 				hypre_solver_s->created_precond_solver=true;
-				//std::cout << "damu 101\n";
 				HYPRE_StructHybridSetPrecond(*solver,
 										   (HYPRE_PtrToStructSolverFcn)precond,
 										   (HYPRE_PtrToStructSolverFcn)precond_setup,
 										   (HYPRE_StructSolver)precond_solver);
 
-			  } else if (do_setup) {
-				  //std::cout << "damu \n";
+			  } else if (do_setup==1) {
 				destroyPrecond(*precond_solver);
-				//std::cout << "damu 102\n";
 				setupPrecond(pg, precond, precond_setup, *precond_solver,
 							 precond_tolerance,precond_solver_type);
 				hypre_solver_s->precond_solver_type = precond_solver_type;
 				hypre_solver_s->created_precond_solver=true;
-				//std::cout << "damu 103\n";
 				HYPRE_StructHybridSetPrecond(*solver,
 										   (HYPRE_PtrToStructSolverFcn)precond,
 										   (HYPRE_PtrToStructSolverFcn)precond_setup,
 										   (HYPRE_StructSolver)precond_solver);
 			  }
 
-			  if (do_setup) {
-				  //std::cout << "damu 104\n";
+			  if (do_setup==1) {
 				HYPRE_StructHybridSetup(*solver, *HA, *HB, *HX);
 			  }
 
-			  //std::cout << "damu 105\n";
 			  HYPRE_StructHybridSolve(*solver, *HA, *HB, *HX);
-
-			  //std::cout << "damu 106\n";
 			  HYPRE_StructHybridGetNumIterations(*solver,&num_iterations);
-			  //std::cout << "damu 107\n";
 			  HYPRE_StructHybridGetFinalRelativeResidualNorm(*solver,
 															 &final_res_norm);
 			  //__________________________________
@@ -1156,26 +1040,19 @@ namespace Uintah {
 			  HYPRE_StructSolver* solver =  hypre_solver_s->solver;
 
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 108\n";
 				HYPRE_StructGMRESCreate(pg->getComm(),solver);
 				hypre_solver_s->solver_type = gmres;
 				hypre_solver_s->created_solver=true;
-			  } else if (do_setup) {
-				  //std::cout << "damu 109\n";
+			  } else if (do_setup==1) {
 				HYPRE_StructGMRESDestroy(*solver);
-				//std::cout << "damu 110\n";
 				HYPRE_StructGMRESCreate(pg->getComm(),solver);
 				hypre_solver_s->solver_type = gmres;
 				hypre_solver_s->created_solver=true;
 			  }
 
-			  //std::cout << "damu 111\n";
 			  HYPRE_StructGMRESSetMaxIter(*solver,params->maxiterations);
-			  //std::cout << "damu 112\n";
 			  HYPRE_StructGMRESSetTol(*solver, params->tolerance);
-			  //std::cout << "damu 113\n";
 			  HYPRE_GMRESSetRelChange((HYPRE_Solver)solver,  0);
-			  //std::cout << "damu 114\n";
 			  HYPRE_StructGMRESSetLogging  (*solver, params->logging);
 
 			  HYPRE_PtrToStructSolverFcn precond;
@@ -1184,38 +1061,28 @@ namespace Uintah {
 			  SolverType precond_solver_type;
 
 			  if (timestep == 1 || restart) {
-				  //std::cout << "damu 115\n";
 				setupPrecond(pg, precond, precond_setup, *precond_solver,
 							 precond_tolerance,precond_solver_type);
 				hypre_solver_s->precond_solver_type = precond_solver_type;
 				hypre_solver_s->created_precond_solver=true;
-				//std::cout << "damu 116\n";
 				HYPRE_StructGMRESSetPrecond(*solver, precond, precond_setup,
 											*precond_solver);
-			  }  else if (do_setup) {
-				  //std::cout << "damu 117\n";
+			  }  else if (do_setup==1) {
 				destroyPrecond(*precond_solver);
-				//std::cout << "damu 118\n";
 				setupPrecond(pg, precond, precond_setup, *precond_solver,
 							 precond_tolerance,precond_solver_type);
 				hypre_solver_s->precond_solver_type = precond_solver_type;
 				hypre_solver_s->created_precond_solver=true;
-				//std::cout << "damu 119\n";
 				HYPRE_StructGMRESSetPrecond(*solver,precond,precond_setup,
 											*precond_solver);
 			  }
 
-			  if (do_setup) {
-				  //std::cout << "damu 120\n";
+			  if (do_setup==1) {
 				HYPRE_StructGMRESSetup(*solver,*HA,*HB,*HX);
 			  }
 
-			  //std::cout << "damu 121\n";
 			  HYPRE_StructGMRESSolve(*solver,*HA,*HB,*HX);
-
-			  //std::cout << "damu 122\n";
 			  HYPRE_StructGMRESGetNumIterations(*solver, &num_iterations);
-			  //std::cout << "damu 123\n";
 			  HYPRE_StructGMRESGetFinalRelativeResidualNorm(*solver,
 															&final_res_norm);
 
@@ -1254,7 +1121,6 @@ namespace Uintah {
 
 			solve_timer.stop();
 
-			//std::cout << "damu 124\n";
 			hypre_EndTiming (tSolveOnly_);
 
 			//__________________________________
@@ -1282,54 +1148,39 @@ namespace Uintah {
 				new_dw->allocateAndPut(Xnew, X_label, matl, patch);
 			  }
 
+	          IntVector hh(h.x()-1, h.y()-1, h.z()-1);
+	          unsigned long Nx = abs(h.x()-l.x()), Ny = abs(h.y()-l.y()), Nz = abs(h.z()-l.z());
+	          int start_offset = l.x() + l.y()*Nx + l.z()*Nx*Ny; //ensure starting point is 0 while indexing d_buff
+	          size_t buff_size = Nx*Ny*Nz*sizeof(double);
+	          double * d_buff = getBuffer( buff_size );	//allocate / reallocate d_buff;
 
+	          // Get the solution back from hypre
+	          HYPRE_StructVectorGetBoxValues(*HX,
+	              l.get_pointer(), hh.get_pointer(),
+	              d_buff);
 
-			 // __asm__ __volatile__ ("" ::: "memory");	//observed occasional crashes in parallel_for here because of invalid value for - h and function iteself.. may be fence will help??
+			  custom_parallel_for(l.z(), h.z(), [&](int k){
+			    for(int j=l.y();j<h.y();j++){
+				  for(int i=l.x();i<h.x();i++){
 
-			  //printf("start %d - %d: %d\n", pg->myrank(), cust_g_team_id, patch->getID() );
-			  //g_rank_temp = pg->myrank();
-			  // Get the solution back from hypre
-			  //for(int z=l.z();z<h.z();z++){
-			  custom_parallel_for(l.z(), h.z(), [&](int z){
-				  //printf("in custom_parallel_for %d - %d %d\n", pg->myrank(), cust_g_team_id, cust_g_thread_id );
-				for(int y=l.y();y<h.y();y++){
-					double* values;
-					//printf(" %d -> %d - %d - Patch : %d: %d %d %d to  %d %d %d\n", pg->myrank(), cust_g_team_id,cust_g_thread_id, patch->getID(), l.x(), l.y(), l.z(), h.x(), h.y(), h.z());
-				  values = &Xnew[IntVector(l.x(), y, z)];
-
-				  IntVector ll(l.x(), y, z);
-				  IntVector hh(h.x()-1, y, z);
-
-				  //std::cout << "damu 125\n";
-
-				  HYPRE_StructVectorGetBoxValues(*HX,
-					  ll.get_pointer(), hh.get_pointer(),
-					  values);
-
-				}
-
-			  });
-
+	              int id = (i + j*Nx + k*Nx*Ny - start_offset);
+	              Xnew(i, j, k) = d_buff[id];
+				  }
+			    } // y loop
+			  }, m_partition_size);  // z loop
 
 			 // printf("end %d - %d: %d\n", pg->myrank(), cust_g_team_id, patch->getID() );
 			}//);
 			//__________________________________
 			// clean up
-			if ( timestep == 1 || do_setup || restart) {
-				//std::cout << "damu 126\n";
+			if ( timestep == 1 || do_setup==1 || restart) {
 			  HYPRE_StructStencilDestroy(stencil);
-			  //std::cout << "damu 127\n";
 			  HYPRE_StructGridDestroy(grid);
 			}
-			//std::cout << "damu 128\n";
 			hypre_EndTiming (tHypreAll_);
-			//std::cout << "damu 129\n";
 			hypre_PrintTiming   ("Hypre Timings:", pg->getComm());
-			//std::cout << "damu 130\n";
 			hypre_FinalizeTiming(tMatVecSetup_);
-			//std::cout << "damu 131\n";
 			hypre_FinalizeTiming(tSolveOnly_);
-			//std::cout << "damu 132\n";
 			hypre_FinalizeTiming(tHypreAll_);
 			hypre_ClearTiming();
 
@@ -1346,7 +1197,7 @@ namespace Uintah {
 			{
 #pragma omp critical
 				{
-				hypre_avg_comm_time += hypre_comm_time;
+				hypre_avg_comm_time += _hypre_comm_time;
 				}
 				hypre_comm_threads_added++;
 			}
@@ -1383,18 +1234,14 @@ namespace Uintah {
 		  if(thread_id==0)
 		  {
 			  //MPI_Barrier(MPI_COMM_WORLD);
-			 // printf("deallocating funneled comm\n");
 		  	deallocate_funneled_comm();
-		  	//printf("deallocating funneled comm - done\n");
 		  }
 #endif
     }//if(!flag)
 
     });
 	//MPI_Barrier(MPI_COMM_WORLD);
-	//printf("hypre_destroy_thread\n");
   hypre_destroy_thread();
-  //printf("hypre_destroy_thread - done\n");
   }
     
     //---------------------------------------------------------------------------------------------
