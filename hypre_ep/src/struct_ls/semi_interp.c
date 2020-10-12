@@ -245,7 +245,8 @@ hypre_SemiInterp( void               *interp_vdata,
     * Compute e at fine points
     *-----------------------------------------------------------------------*/
 
-   for (compute_i = 0; compute_i < 2; compute_i++)
+   int completed = 0;
+   for (compute_i = 0; completed == 0; compute_i++)
    {
       switch(compute_i)
       {
@@ -257,10 +258,10 @@ hypre_SemiInterp( void               *interp_vdata,
          }
          break;
 
-         case 1:
+         default:
          {
-            hypre_FinalizeIndtComputations(comm_handle);
-            compute_box_aa = hypre_ComputePkgDeptBoxes(compute_pkg);
+        	hypre_FinalizeOverlappedCommunication(comm_handle, compute_pkg, &completed);
+        	compute_box_aa = hypre_ComputePkgRollingDeptBoxes(compute_pkg);
          }
          break;
       }
@@ -354,6 +355,8 @@ hypre_SemiInterp( void               *interp_vdata,
          }
       }
    }
+   hypre_FinalizeSends(comm_handle);
+
 #if defined(HYPRE_USING_CUDA)
    if (data_location_f != data_location_c)
    {

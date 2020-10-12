@@ -2076,6 +2076,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f, int ac
         stride2, i2) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2;\
 	zypre_CalcStrideBasic(boxinfo1, stride1);	\
 	zypre_CalcStrideBasic(boxinfo2, stride2); \
@@ -2102,12 +2103,24 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f, int ac
 		f(hypre___k);\
 }
 
+#define zypre_newBasicBoxLoop2EndParallel(i1, i2)\
+				i1 += boxinfo1.stride[0];\
+				i2 += boxinfo2.stride[0];\
+			}\
+			i1 += boxinfo1.stride[1];\
+			i2 += boxinfo2.stride[1];\
+		}\
+	};\
+	executeLoop(1);\
+}
+
 
 #define zypre_newBasicBoxLoop2BeginSimd(ndim, loop_size,                          \
         stride1, i1,                              \
         stride2, i2) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2;\
 	zypre_CalcStrideBasic(boxinfo1, stride1);	\
 	zypre_CalcStrideBasic(boxinfo2, stride2); \
@@ -2135,6 +2148,16 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f, int ac
 		f(hypre___k);\
 }
 
+#define zypre_newBasicBoxLoop2EndSimdParallel(i1, i2)\
+				i1++;\
+				i2++;\
+			}\
+			i1 += boxinfo1.stride[1];\
+			i2 += boxinfo2.stride[1];\
+		}\
+	};\
+	executeLoop(SIMD_LEN);\
+}
 
 #define hypre_BoxLoop2ReductionBegin(ndim, loop_size, dbox1, start1, stride1, i1, \
                                                       dbox2, start2, stride2, i2, reducesum) \
@@ -3421,6 +3444,7 @@ typedef struct hypre_Boxloop_struct
 #define hypre_BoxLoop4End        zypre_newBoxLoop4End
 #define hypre_BasicBoxLoop2Begin zypre_newBasicBoxLoop2Begin
 #define hypre_BasicBoxLoop2End   zypre_newBasicBoxLoop2End
+#define hypre_BasicBoxLoop2EndParallel   zypre_newBasicBoxLoop2EndParallel
 
 #ifdef USE_SIMD
 #define hypre_BoxLoop1BeginSimd      zypre_newBoxLoop1BeginSimd
@@ -3431,6 +3455,7 @@ typedef struct hypre_Boxloop_struct
 #define hypre_BoxLoop3EndSimd        zypre_newBoxLoop3EndSimd
 #define hypre_BasicBoxLoop2BeginSimd zypre_newBasicBoxLoop2BeginSimd
 #define hypre_BasicBoxLoop2EndSimd   zypre_newBasicBoxLoop2EndSimd
+#define hypre_BasicBoxLoop2EndSimdParallel   zypre_newBasicBoxLoop2EndSimdParallel
 #else
 #define hypre_BoxLoop1BeginSimd      zypre_newBoxLoop1Begin
 #define hypre_BoxLoop1EndSimd        zypre_newBoxLoop1End
@@ -3440,6 +3465,7 @@ typedef struct hypre_Boxloop_struct
 #define hypre_BoxLoop3EndSimd        zypre_newBoxLoop3End
 #define hypre_BasicBoxLoop2BeginSimd zypre_newBasicBoxLoop2Begin
 #define hypre_BasicBoxLoop2EndSimd   zypre_newBasicBoxLoop2End
+#define hypre_BasicBoxLoop2EndSimdParallel   zypre_newBasicBoxLoop2EndParallel
 #endif
 
 
@@ -4567,6 +4593,9 @@ typedef struct hypre_StructStencil_struct
 #ifndef hypre_COMMUNICATION_HEADER
 #define hypre_COMMUNICATION_HEADER
 
+extern "C++" {
+#include <map>
+
 /*--------------------------------------------------------------------------
  * hypre_CommInfo:
  *
@@ -4676,6 +4705,9 @@ typedef struct hypre_CommPkg_struct
    hypre_Index       identity_dir;
    HYPRE_Int        *identity_order;
 
+   std::multimap<int, int> proc_to_box_map;	//key is mpi rank, value is box index "i" in hypre_StructGridBoxes(grid)
+   HYPRE_Int             *ext_deps;	//num of external dependencies for each box
+   HYPRE_Int              num_of_boxes;
 } hypre_CommPkg;
 
 /*--------------------------------------------------------------------------
@@ -4700,7 +4732,11 @@ typedef struct hypre_CommHandle_struct
 	
    /* set = 0, add = 1 */
    HYPRE_Int       action;
-
+   HYPRE_Int  *interthread_requests; //similar to MPI_Request. Store recv req handle for inter-thread comm.
+   HYPRE_Int  *mpi_to_i, *interthread_to_i; //mapping to num_recvs index. Needed to get comm_type. Find out a better way.
+   HYPRE_Int   num_mpi_sends, num_mpi_recvs, num_inter_thread_sends, num_inter_thread_recvs;
+   HYPRE_Int  *ext_deps;	//num of external dependencies for each box. Deep copy it every time from CommPkg.
+   HYPRE_Int  *indices; 	//array of indices for mpi_waitsome
 } hypre_CommHandle;
 
 /*--------------------------------------------------------------------------
@@ -4792,6 +4828,9 @@ typedef struct hypre_CommHandle_struct
 #define hypre_CommPkgIdentityDir(comm_pkg)     (comm_pkg -> identity_dir)
 #define hypre_CommPkgIdentityOrder(comm_pkg)   (comm_pkg -> identity_order)
 
+#define hypre_CommPkgProcToBoxMap(comm_pkg)    (comm_pkg -> proc_to_box_map)
+#define hypre_CommPkgExtDeps(comm_pkg)         (comm_pkg -> ext_deps)
+#define hypre_CommPkgNumOfBoxes(comm_pkg)         (comm_pkg -> num_of_boxes)
 /*--------------------------------------------------------------------------
  * Accessor macros: hypre_CommHandle
  *--------------------------------------------------------------------------*/
@@ -4807,7 +4846,16 @@ typedef struct hypre_CommHandle_struct
 #define hypre_CommHandleAction(comm_handle)      (comm_handle -> action)
 #define hypre_CommHandleSendBuffersDevice(comm_handle)    (comm_handle -> send_buffers_data)
 #define hypre_CommHandleRecvBuffersDevice(comm_handle)    (comm_handle -> recv_buffers_data)
-
+#define hypre_CommHandleInterThreadReq(comm_handle)       (comm_handle -> interthread_requests)
+#define hypre_CommHandleMPIToI(comm_handle)               (comm_handle -> mpi_to_i)
+#define hypre_CommHandleInterThreadToI(comm_handle)       (comm_handle -> interthread_to_i)
+#define hypre_CommHandleNumMPISends(comm_handle)               (comm_handle -> num_mpi_sends)
+#define hypre_CommHandleNumMPIRecvs(comm_handle)               (comm_handle -> num_mpi_recvs)
+#define hypre_CommHandleNumInterThreadSends(comm_handle)       (comm_handle -> num_inter_thread_sends)
+#define hypre_CommHandleNumInterThreadRecvs(comm_handle)       (comm_handle -> num_inter_thread_recvs)
+#define hypre_CommHandleExtDeps(comm_handle)         (comm_handle -> ext_deps)
+#define hypre_CommHandleIndices(comm_handle)         (comm_handle -> indices)
+};
 #endif
 /*BHEADER**********************************************************************
  * Copyright (c) 2008,  Lawrence Livermore National Security, LLC.
@@ -4836,6 +4884,7 @@ typedef struct hypre_CommHandle_struct
  * hypre_ComputeInfo:
  *--------------------------------------------------------------------------*/
 
+
 typedef struct hypre_ComputeInfo_struct
 {
    hypre_CommInfo        *comm_info;
@@ -4857,6 +4906,8 @@ typedef struct hypre_ComputePkg_struct
 
    hypre_BoxArrayArray   *indt_boxes;
    hypre_BoxArrayArray   *dept_boxes;
+   hypre_BoxArrayArray   *rolling_dept_boxes; //Used in overlapped comm. Add/remove boxes as comm is completed.
+
    hypre_Index            stride;
 
    hypre_StructGrid      *grid;
@@ -4887,6 +4938,8 @@ typedef struct hypre_ComputePkg_struct
 #define hypre_ComputePkgGrid(compute_pkg)         (compute_pkg -> grid)
 #define hypre_ComputePkgDataSpace(compute_pkg)    (compute_pkg -> data_space)
 #define hypre_ComputePkgNumValues(compute_pkg)    (compute_pkg -> num_values)
+#define hypre_ComputePkgRollingDeptBoxes(compute_pkg) (compute_pkg -> rolling_dept_boxes)
+
 
 #endif
 /*BHEADER**********************************************************************
@@ -5281,7 +5334,8 @@ HYPRE_Int hypre_InitializeCommunication ( hypre_CommPkg *comm_pkg , HYPRE_Comple
 HYPRE_Int hypre_FinalizeCommunication ( hypre_CommHandle *comm_handle );
 HYPRE_Int hypre_ExchangeLocalData ( hypre_CommPkg *comm_pkg , HYPRE_Complex *send_data , HYPRE_Complex *recv_data , HYPRE_Int action );
 HYPRE_Int hypre_CommPkgDestroy ( hypre_CommPkg *comm_pkg );
-
+void hypre_FinalizeSends( hypre_CommHandle *comm_handle);
+HYPRE_Int hypre_FinalizeOverlappedCommunication( hypre_CommHandle *comm_handle,    hypre_ComputePkg *compute_pkg, HYPRE_Int *completed_ptr );
 /* struct_copy.c */
 HYPRE_Int hypre_StructCopy ( hypre_StructVector *x , hypre_StructVector *y );
 HYPRE_Int hypre_StructPartialCopy ( hypre_StructVector *x , hypre_StructVector *y , hypre_BoxArrayArray *array_boxes );

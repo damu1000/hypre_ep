@@ -312,6 +312,7 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f, int ac
         stride2, i2) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2;\
 	zypre_CalcStrideBasic(boxinfo1, stride1);	\
 	zypre_CalcStrideBasic(boxinfo2, stride2); \
@@ -338,12 +339,24 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f, int ac
 		f(hypre___k);\
 }
 
+#define zypre_newBasicBoxLoop2EndParallel(i1, i2)\
+				i1 += boxinfo1.stride[0];\
+				i2 += boxinfo2.stride[0];\
+			}\
+			i1 += boxinfo1.stride[1];\
+			i2 += boxinfo2.stride[1];\
+		}\
+	};\
+	executeLoop(1);\
+}
+
 
 #define zypre_newBasicBoxLoop2BeginSimd(ndim, loop_size,                          \
         stride1, i1,                              \
         stride2, i2) \
 {\
 	int *loop_dim = loop_size;\
+	HYPRE_Int  hypre__start_line=__LINE__;\
 	hypre_Box_info boxinfo1, boxinfo2;\
 	zypre_CalcStrideBasic(boxinfo1, stride1);	\
 	zypre_CalcStrideBasic(boxinfo2, stride2); \
@@ -371,6 +384,16 @@ extern void custom_parallel_for(int b, int e, std::function<void(int)> f, int ac
 		f(hypre___k);\
 }
 
+#define zypre_newBasicBoxLoop2EndSimdParallel(i1, i2)\
+				i1++;\
+				i2++;\
+			}\
+			i1 += boxinfo1.stride[1];\
+			i2 += boxinfo2.stride[1];\
+		}\
+	};\
+	executeLoop(SIMD_LEN);\
+}
 
 #define hypre_BoxLoop2ReductionBegin(ndim, loop_size, dbox1, start1, stride1, i1, \
                                                       dbox2, start2, stride2, i2, reducesum) \
@@ -1657,6 +1680,7 @@ typedef struct hypre_Boxloop_struct
 #define hypre_BoxLoop4End        zypre_newBoxLoop4End
 #define hypre_BasicBoxLoop2Begin zypre_newBasicBoxLoop2Begin
 #define hypre_BasicBoxLoop2End   zypre_newBasicBoxLoop2End
+#define hypre_BasicBoxLoop2EndParallel   zypre_newBasicBoxLoop2EndParallel
 
 #ifdef USE_SIMD
 #define hypre_BoxLoop1BeginSimd      zypre_newBoxLoop1BeginSimd
@@ -1667,6 +1691,7 @@ typedef struct hypre_Boxloop_struct
 #define hypre_BoxLoop3EndSimd        zypre_newBoxLoop3EndSimd
 #define hypre_BasicBoxLoop2BeginSimd zypre_newBasicBoxLoop2BeginSimd
 #define hypre_BasicBoxLoop2EndSimd   zypre_newBasicBoxLoop2EndSimd
+#define hypre_BasicBoxLoop2EndSimdParallel   zypre_newBasicBoxLoop2EndSimdParallel
 #else
 #define hypre_BoxLoop1BeginSimd      zypre_newBoxLoop1Begin
 #define hypre_BoxLoop1EndSimd        zypre_newBoxLoop1End
@@ -1676,6 +1701,7 @@ typedef struct hypre_Boxloop_struct
 #define hypre_BoxLoop3EndSimd        zypre_newBoxLoop3End
 #define hypre_BasicBoxLoop2BeginSimd zypre_newBasicBoxLoop2Begin
 #define hypre_BasicBoxLoop2EndSimd   zypre_newBasicBoxLoop2End
+#define hypre_BasicBoxLoop2EndSimdParallel   zypre_newBasicBoxLoop2EndParallel
 #endif
 
 

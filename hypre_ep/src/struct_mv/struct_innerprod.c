@@ -56,7 +56,6 @@ hypre_StructInnerProd( hypre_StructVector *x,
 #if BOXLOOP_VER==5
    HYPRE_Int        num_threads = get_team_size();
    HYPRE_Real *local_sum = (HYPRE_Real *)malloc (sizeof(HYPRE_Real)*num_threads);
-
    for(int j=0; j<num_threads; j++)
 	   local_sum[j]=0.0;
 #endif
@@ -102,6 +101,7 @@ hypre_StructInnerProd( hypre_StructVector *x,
 
 
 #if BOXLOOP_VER==5
+      //using hypre_BoxLoop2BeginSimd here causes occasional race condition and small error in the output. Ok for now.
       hypre_BoxLoop2BeginSimd(ndim, loop_size,
                                    x_data_box, start, unit_stride, xi,
                                    y_data_box, start, unit_stride, yi)
@@ -113,6 +113,21 @@ hypre_StructInnerProd( hypre_StructVector *x,
 
    for(int j=0; j<num_threads; j++)
 	   local_result += local_sum[j];
+
+//   free(local_sum); //getting double free error and crash. Need to relook why.
+
+//      hypre_BoxLoop2ReductionBeginSimd(ndim, loop_size,
+//                                   x_data_box, start, unit_stride, xi,
+//                                   y_data_box, start, unit_stride, yi,
+//                                   box_sum)
+//      {
+//         HYPRE_Real tmp = xp[xi] * hypre_conj(yp[yi]);
+//         box_sum += tmp;
+//      }
+//      hypre_BoxLoop2ReductionEndSimd(xi, yi, box_sum);
+//
+//      local_result += (HYPRE_Real) box_sum;
+
 #else
 
    hypre_BoxLoop2ReductionBeginSimd(ndim, loop_size,

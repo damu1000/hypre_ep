@@ -174,8 +174,8 @@ hypre_StructMatvecCompute( void               *matvec_vdata,
    /*-----------------------------------------------------------------------
     * Do (alpha != 0.0) computation
     *-----------------------------------------------------------------------*/
-
-   for (compute_i = 0; compute_i < 2; compute_i++)
+   int completed = 0;
+   for (compute_i = 0; completed == 0; compute_i++)
    {
       switch(compute_i)
       {
@@ -250,10 +250,10 @@ hypre_StructMatvecCompute( void               *matvec_vdata,
          }
          break;
 
-         case 1:
+         default:
          {
-            hypre_FinalizeIndtComputations(comm_handle);
-            compute_box_aa = hypre_ComputePkgDeptBoxes(compute_pkg);
+        	 hypre_FinalizeOverlappedCommunication(comm_handle, compute_pkg, &completed);
+        	 compute_box_aa = hypre_ComputePkgRollingDeptBoxes(compute_pkg);
          }
          break;
       }
@@ -282,6 +282,8 @@ hypre_StructMatvecCompute( void               *matvec_vdata,
       }
 
    }
+
+   hypre_FinalizeSends(comm_handle);
 
    if (x_tmp)
    {

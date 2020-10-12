@@ -68,7 +68,7 @@ void inline verifyX(ViewDouble A, size_t size, std::vector<int>& my_patches){ //
 
 			for(int j=0; j<size; j++){
 				if(fabs(AM[i*size + j] - correct[j]) > 1e-9 ){
-					printf("Error at node %d -> correct: %f \t computed:%f \t diff: %f in file %s\n", j, correct[j], AM[i*size + j], fabs(AM[i*size + j] - correct[j]), filename.c_str());
+					printf("Error at node %d -> correct: %f \t computed:%f \t diff: %e in file %s\n", j, correct[j], AM[i*size + j], fabs(AM[i*size + j] - correct[j]), filename.c_str());
 					exit(1);
 				}
 			}

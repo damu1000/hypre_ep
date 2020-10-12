@@ -2005,6 +2005,8 @@ HYPRE_Int hypre_MPI_Imrecv(void 				*buf,
 void hypre_set_num_threads(int n, int team_size, int (*f)());	//defined in hypre_mpi_ep_helper.h
 int hypre_init_thread();	//defined in hypre_mpi_ep_helper.h
 void hypre_destroy_thread();	//defined in hypre_mpi_ep_helper.h
+int irWaitsome(int incount, int *requests, int *outcount, int *indices);
+void irWaitSend();
 
 #ifndef RANK_DIR_DEF
 #define RANK_DIR_DEF

@@ -77,6 +77,7 @@ int argc;
 typedef struct IntVector
 {
 	int value[3]; //x: 0, y:1, z:2. Loop order z, y, x. x changes fastest.
+	inline int &operator[](int i){return value[i];}
 } IntVector;
 
 int get_affinity() {
@@ -237,6 +238,14 @@ void getMyPatches( std::vector<int>& my_patches, int my_rank)
 	}
 }
 
+void extendGrid(HYPRE_StructGrid *grid, int l0, int l1, int l2, int h0, int h1, int h2)
+{
+//	printf("%d %d %d %d %d %d\n", l0, l1, l2, h0, h1, h2);
+	IntVector l, h;
+	l[0] = l0; l[1] = l1; l[2] = l2;
+	h[0] = h0; h[1] = h1; h[2] = h2;
+	HYPRE_StructGridSetExtents(*grid, l.value, h.value);
+}
 
 void hypre_solve(const char * exp_type, xmlInput input)
 {
@@ -283,14 +292,14 @@ void hypre_solve(const char * exp_type, xmlInput input)
 		int patch_id = my_patches[i];
 
 		// convert patch_id into 3d patch co-cordinates. Multiply by patch_size to get starting cell of patch.
-		low[i].value[0] = x_dim * (patch_id % input.xpatches);
-		low[i].value[1] = y_dim * ((patch_id / input.xpatches) % input.ypatches);
-		low[i].value[2] = z_dim * ((patch_id / input.xpatches) / input.ypatches);
+		low[i][0] = x_dim * (patch_id % input.xpatches);
+		low[i][1] = y_dim * ((patch_id / input.xpatches) % input.ypatches);
+		low[i][2] = z_dim * ((patch_id / input.xpatches) / input.ypatches);
 
 		// add patch_size to low to get end cell of patch. subtract 1 as hypre uses inclusive boundaries... as per Uintah code
-		high[i].value[0] = low[i].value[0] + x_dim - 1; //including high cell. hypre needs so.. i guess
-		high[i].value[1] = low[i].value[1] + y_dim - 1;
-		high[i].value[2] = low[i].value[2] + z_dim - 1;
+		high[i][0] = low[i][0] + x_dim - 1; //including high cell. hypre needs so.. i guess
+		high[i][1] = low[i][1] + y_dim - 1;
+		high[i][2] = low[i][2] + z_dim - 1;
 		//printf("%d/%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", rank, size, patch_id, low[i].value[0], low[i].value[1], low[i].value[2], high[i].value[0], high[i].value[1], high[i].value[2]);
 	}
 
@@ -340,8 +349,26 @@ void hypre_solve(const char * exp_type, xmlInput input)
 		{
 			// Setup grid
 			HYPRE_StructGridCreate(MPI_COMM_WORLD, 3, &grid);
-			for(int i=0; i<patches_per_rank; i++)
-				HYPRE_StructGridSetExtents(grid, low[i].value, high[i].value);
+
+			int ngc = input.patch_size / 16; //number of ghost cells. These will be used for "ghost" patches.
+			for(int i=0; i<patches_per_rank; i++){
+				if(ngc>0){
+					IntVector l = low[i], h = high[i];
+					extendGrid(&grid, l[0]+ngc  , l[1]+ngc  , l[2]+ngc  , h[0]-ngc  , h[1]-ngc  , h[2]-ngc  ); //inner patch
+
+					extendGrid(&grid, l[0]      , l[1]      , l[2]      , h[0]      , h[1]      , l[2]+ngc-1); //top
+					extendGrid(&grid, l[0]      , l[1]      , h[2]-ngc+1, h[0]      , h[1]      , h[2]      ); //bottom
+
+					extendGrid(&grid, l[0]      , l[1]      , l[2]+ngc  , h[0]      , l[1]+ngc-1, h[2]-ngc  ); //left
+					extendGrid(&grid, l[0]      , h[1]-ngc+1, l[2]+ngc  , h[0]      , h[1]      , h[2]-ngc  ); //right
+
+					extendGrid(&grid, l[0]      , l[1]+ngc  , l[2]+ngc  , l[0]+ngc-1, h[1]-ngc  , h[2]-ngc  ); //front
+					extendGrid(&grid, h[0]-ngc+1, l[1]+ngc  , l[2]+ngc  , h[0]      , h[1]-ngc  , h[2]-ngc  ); //bacl
+
+				}
+				else
+					HYPRE_StructGridSetExtents(grid, low[i].value, high[i].value);
+			}
 
 			HYPRE_StructGridSetPeriodic(grid, periodic);	// No Periodic boundaries
 
