@@ -190,8 +190,7 @@ hypre_SemiRestrict( void               *restrict_vdata,
    rc_tmp = rc;
 #endif
 
-   int completed = 0;
-   for (compute_i = 0; completed == 0; compute_i++)
+   for (compute_i = 0; compute_i < 2; compute_i++)
    {
       switch(compute_i)
       {
@@ -203,24 +202,21 @@ hypre_SemiRestrict( void               *restrict_vdata,
          }
          break;
 
-         default:
+         case 1:
          {
-        	 hypre_FinalizeOverlappedCommunication(comm_handle, compute_pkg, &completed);
-        	 compute_box_aa = hypre_ComputePkgRollingDeptBoxes(compute_pkg);
+            hypre_FinalizeIndtComputations(comm_handle);
+            compute_box_aa = hypre_ComputePkgDeptBoxes(compute_pkg);
          }
          break;
       }
 
       fi = 0;
-      hypre_ForBoxI(fi, compute_box_aa)
+      hypre_ForBoxI(ci, cgrid_boxes)
       {
-    	 ci=0;
          while (fgrid_ids[fi] != cgrid_ids[ci])
          {
-            ci++;
+            fi++;
          }
-         if(ci>=hypre_BoxArraySize(cgrid_boxes))
-        	 continue;
 
          compute_box_a = hypre_BoxArrayArrayBoxArray(compute_box_aa, fi);
 
@@ -315,8 +311,6 @@ hypre_SemiRestrict( void               *restrict_vdata,
          }
       }
    }
-   hypre_FinalizeSends(comm_handle);
-
 #if defined(HYPRE_USING_CUDA)
    if (data_location_f != data_location_c)
    {

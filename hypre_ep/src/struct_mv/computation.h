@@ -25,7 +25,6 @@
  * hypre_ComputeInfo:
  *--------------------------------------------------------------------------*/
 
-
 typedef struct hypre_ComputeInfo_struct
 {
    hypre_CommInfo        *comm_info;
@@ -47,8 +46,6 @@ typedef struct hypre_ComputePkg_struct
 
    hypre_BoxArrayArray   *indt_boxes;
    hypre_BoxArrayArray   *dept_boxes;
-   hypre_BoxArrayArray   *rolling_dept_boxes; //Used in overlapped comm. Add/remove boxes as comm is completed.
-
    hypre_Index            stride;
 
    hypre_StructGrid      *grid;
@@ -79,7 +76,5 @@ typedef struct hypre_ComputePkg_struct
 #define hypre_ComputePkgGrid(compute_pkg)         (compute_pkg -> grid)
 #define hypre_ComputePkgDataSpace(compute_pkg)    (compute_pkg -> data_space)
 #define hypre_ComputePkgNumValues(compute_pkg)    (compute_pkg -> num_values)
-#define hypre_ComputePkgRollingDeptBoxes(compute_pkg) (compute_pkg -> rolling_dept_boxes)
-
 
 #endif

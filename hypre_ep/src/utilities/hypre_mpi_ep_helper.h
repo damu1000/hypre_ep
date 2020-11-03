@@ -84,30 +84,30 @@ void irInsertMessage(const char* type, //hardcode as "send" or "recv". Used for 
 		void **rbuf = &g_recv_buff[g_thread_id * g_num_of_threads];
 		int *size= &g_size_buff[g_thread_id * g_num_of_threads];
 
-//		//try to progress
-//		for(int i=0; i<g_num_of_threads; i++){
-//			if(rbuf[i] != NULL){//data is received
-//				if(g_send_buff[i * g_num_of_threads + g_thread_id] != NULL){
-//					memcpy(rbuf[i], g_send_buff[i * g_num_of_threads + g_thread_id], size[i]);
-//					size[i] = 0;
-//					rbuf[i] = NULL;
-//					g_send_buff[i * g_num_of_threads + g_thread_id] = NULL;
-//					recv_done++;
-//				}
-//			}
-//		}
+		//try to progress
+		for(int i=0; i<g_num_of_threads; i++){
+			if(rbuf[i] != NULL){//data is received
+				if(g_send_buff[i * g_num_of_threads + g_thread_id] != NULL){
+					memcpy(rbuf[i], g_send_buff[i * g_num_of_threads + g_thread_id], size[i]);
+					size[i] = 0;
+					rbuf[i] = NULL;
+					g_send_buff[i * g_num_of_threads + g_thread_id] = NULL;
+					recv_done++;
+				}
+			}
+		}
 
-//		if(g_send_buff[tid * g_num_of_threads + g_thread_id] != NULL){//copy at once if sender has sent data
-//			memcpy(buf, g_send_buff[tid * g_num_of_threads + g_thread_id], count);
-//			g_send_buff[tid * g_num_of_threads + g_thread_id] = NULL;
-//			recv_count++;
-//			recv_done++;
-//		}
-//		else{
+		if(g_send_buff[tid * g_num_of_threads + g_thread_id] != NULL){//copy at once if sender has sent data
+			memcpy(buf, g_send_buff[tid * g_num_of_threads + g_thread_id], count);
+			g_send_buff[tid * g_num_of_threads + g_thread_id] = NULL;
+			recv_count++;
+			recv_done++;
+		}
+		else{
 			recv_count++;
 			size[tid] = count;
 			rbuf[tid] = buf; //tid is src
-//		}
+		}
 	}
 	else //send
 		g_send_buff[g_thread_id * g_num_of_threads + tid] = buf; //tid is dest
@@ -120,7 +120,7 @@ int irWaitAll()
 	int *size= &g_size_buff[g_thread_id * g_num_of_threads];
 	while(recv_done < recv_count){
 		for(int i=0; i<g_num_of_threads; i++){
-			if(rbuf[i] != NULL){//data is to be received
+			if(rbuf[i] != NULL){//data is received
 				if(g_send_buff[i * g_num_of_threads + g_thread_id] != NULL)
 				{
 					memcpy(rbuf[i], g_send_buff[i * g_num_of_threads + g_thread_id], size[i]);
@@ -144,52 +144,7 @@ int irWaitAll()
 	return ircount;
 }
 
-//request contains list of source ranks. return 1 if ALL requests in request are completed, 0 otherwise
-int irWaitsome(int incount, int *requests, int *outcount, int *indices)
-{
-	if(recv_done >= recv_count)
-		return 1;
 
-	void **rbuf = &g_recv_buff[g_thread_id * g_num_of_threads];
-	int *size= &g_size_buff[g_thread_id * g_num_of_threads];
-	int count = 0, completed=0;
-
-	while(/*count == 0 &&*/ completed < incount){
-		completed = 0;
-		for(int i=0; i<incount; i++){
-			if(requests[i]==-1){
-				completed++;
-				continue;
-			}
-
-			int src_thread = requests[i] % g_num_of_threads;
-			if(rbuf[src_thread] != NULL && g_send_buff[src_thread * g_num_of_threads + g_thread_id] != NULL){//data is to be received
-				memcpy(rbuf[src_thread], g_send_buff[src_thread * g_num_of_threads + g_thread_id], size[src_thread]);
-				size[src_thread] = 0;
-				rbuf[src_thread] = NULL;
-				g_send_buff[src_thread * g_num_of_threads + g_thread_id] = NULL;
-				recv_done++;
-				indices[count] = i;
-				requests[i] = -1;
-				count++;
-				completed++;
-			}
-		}
-	}
-	*outcount = count;
-
-	return (completed == incount);
-}
-
-void irWaitSend() //wait untill all sends are completed.
-{
-	recv_count=0;
-	recv_done =0;
-
-	for(int i=0; i<g_num_of_threads; i++){
-		while(g_send_buff[g_num_of_threads * g_thread_id + i] != NULL) std::this_thread::yield();
-	}
-}
 /************************************************************************************************************************************
 
 Multiple comms for EP

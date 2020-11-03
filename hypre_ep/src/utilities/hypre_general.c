@@ -22,7 +22,6 @@
  *
  *****************************************************************************/
 thread_local int hypre_min_workload=1;
-__thread int g_overlap_comm=0;
 
 void
 HYPRE_Init( hypre_int argc, char *argv[] )
@@ -43,9 +42,6 @@ HYPRE_Init( hypre_int argc, char *argv[] )
 
 #endif
 
-	const char * overlap_comm_str = getenv("HYPRE_OVERLAPP_COMM");
-	if(overlap_comm_str)
-		g_overlap_comm = atoi(overlap_comm_str);
 
    /*
    HYPRE_Int  num_procs, myid;

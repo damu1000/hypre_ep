@@ -543,8 +543,7 @@ hypre_PointRelax( void               *relax_vdata,
       /*hypre_StructCopy(x, t); ... not needed as long as the copy at the end of the loop
         is restricted to the current pointset (hypre_relax_copy, hypre_relax_wtx */
 
-      int completed = 0;
-      for (compute_i = 0; completed == 0; compute_i++)
+      for (compute_i = 0; compute_i < 2; compute_i++)
       {
          switch(compute_i)
          {
@@ -556,10 +555,10 @@ hypre_PointRelax( void               *relax_vdata,
             }
             break;
 
-            default:
+            case 1:
             {
-           	   hypre_FinalizeOverlappedCommunication(comm_handle, compute_pkg, &completed);
-           	   compute_box_aa = hypre_ComputePkgRollingDeptBoxes(compute_pkg);
+               hypre_FinalizeIndtComputations(comm_handle);
+               compute_box_aa = hypre_ComputePkgDeptBoxes(compute_pkg);
             }
             break;
          }
@@ -639,7 +638,7 @@ hypre_PointRelax( void               *relax_vdata,
             }
          }
       }
-      hypre_FinalizeSends(comm_handle);
+
 
       if (weight != 1.0)
       {

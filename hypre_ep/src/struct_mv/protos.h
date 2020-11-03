@@ -200,8 +200,7 @@ HYPRE_Int hypre_InitializeCommunication ( hypre_CommPkg *comm_pkg , HYPRE_Comple
 HYPRE_Int hypre_FinalizeCommunication ( hypre_CommHandle *comm_handle );
 HYPRE_Int hypre_ExchangeLocalData ( hypre_CommPkg *comm_pkg , HYPRE_Complex *send_data , HYPRE_Complex *recv_data , HYPRE_Int action );
 HYPRE_Int hypre_CommPkgDestroy ( hypre_CommPkg *comm_pkg );
-void hypre_FinalizeSends( hypre_CommHandle *comm_handle);
-HYPRE_Int hypre_FinalizeOverlappedCommunication( hypre_CommHandle *comm_handle,    hypre_ComputePkg *compute_pkg, HYPRE_Int *completed_ptr );
+
 /* struct_copy.c */
 HYPRE_Int hypre_StructCopy ( hypre_StructVector *x , hypre_StructVector *y );
 HYPRE_Int hypre_StructPartialCopy ( hypre_StructVector *x , hypre_StructVector *y , hypre_BoxArrayArray *array_boxes );

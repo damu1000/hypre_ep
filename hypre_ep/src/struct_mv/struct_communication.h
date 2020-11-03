@@ -13,9 +13,6 @@
 #ifndef hypre_COMMUNICATION_HEADER
 #define hypre_COMMUNICATION_HEADER
 
-extern "C++" {
-#include <map>
-
 /*--------------------------------------------------------------------------
  * hypre_CommInfo:
  *
@@ -125,9 +122,6 @@ typedef struct hypre_CommPkg_struct
    hypre_Index       identity_dir;
    HYPRE_Int        *identity_order;
 
-   std::multimap<int, int> proc_to_box_map;	//key is mpi rank, value is box index "i" in hypre_StructGridBoxes(grid)
-   HYPRE_Int             *ext_deps;	//num of external dependencies for each box
-   HYPRE_Int              num_of_boxes;
 } hypre_CommPkg;
 
 /*--------------------------------------------------------------------------
@@ -152,11 +146,7 @@ typedef struct hypre_CommHandle_struct
 	
    /* set = 0, add = 1 */
    HYPRE_Int       action;
-   HYPRE_Int  *interthread_requests; //similar to MPI_Request. Store recv req handle for inter-thread comm.
-   HYPRE_Int  *mpi_to_i, *interthread_to_i; //mapping to num_recvs index. Needed to get comm_type. Find out a better way.
-   HYPRE_Int   num_mpi_sends, num_mpi_recvs, num_inter_thread_sends, num_inter_thread_recvs;
-   HYPRE_Int  *ext_deps;	//num of external dependencies for each box. Deep copy it every time from CommPkg.
-   HYPRE_Int  *indices; 	//array of indices for mpi_waitsome
+
 } hypre_CommHandle;
 
 /*--------------------------------------------------------------------------
@@ -248,9 +238,6 @@ typedef struct hypre_CommHandle_struct
 #define hypre_CommPkgIdentityDir(comm_pkg)     (comm_pkg -> identity_dir)
 #define hypre_CommPkgIdentityOrder(comm_pkg)   (comm_pkg -> identity_order)
 
-#define hypre_CommPkgProcToBoxMap(comm_pkg)    (comm_pkg -> proc_to_box_map)
-#define hypre_CommPkgExtDeps(comm_pkg)         (comm_pkg -> ext_deps)
-#define hypre_CommPkgNumOfBoxes(comm_pkg)         (comm_pkg -> num_of_boxes)
 /*--------------------------------------------------------------------------
  * Accessor macros: hypre_CommHandle
  *--------------------------------------------------------------------------*/
@@ -266,14 +253,5 @@ typedef struct hypre_CommHandle_struct
 #define hypre_CommHandleAction(comm_handle)      (comm_handle -> action)
 #define hypre_CommHandleSendBuffersDevice(comm_handle)    (comm_handle -> send_buffers_data)
 #define hypre_CommHandleRecvBuffersDevice(comm_handle)    (comm_handle -> recv_buffers_data)
-#define hypre_CommHandleInterThreadReq(comm_handle)       (comm_handle -> interthread_requests)
-#define hypre_CommHandleMPIToI(comm_handle)               (comm_handle -> mpi_to_i)
-#define hypre_CommHandleInterThreadToI(comm_handle)       (comm_handle -> interthread_to_i)
-#define hypre_CommHandleNumMPISends(comm_handle)               (comm_handle -> num_mpi_sends)
-#define hypre_CommHandleNumMPIRecvs(comm_handle)               (comm_handle -> num_mpi_recvs)
-#define hypre_CommHandleNumInterThreadSends(comm_handle)       (comm_handle -> num_inter_thread_sends)
-#define hypre_CommHandleNumInterThreadRecvs(comm_handle)       (comm_handle -> num_inter_thread_recvs)
-#define hypre_CommHandleExtDeps(comm_handle)         (comm_handle -> ext_deps)
-#define hypre_CommHandleIndices(comm_handle)         (comm_handle -> indices)
-};
+
 #endif
