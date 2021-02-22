@@ -1,7 +1,7 @@
 # hypre_ep
 
 ## Hypre using MPI End Points:
-This is the modified multi-threaded version of the Hypre linear solver library developed by LLNL (https://github.com/hypre-space/hypre). This version treats each thread as one MPI End Point instead of using openmp to parallelize data-parallel loops to achive faster performance. More details are presented in "Sahasrabudhe D., Berzins M. (2020) Improving Performance of the Hypre Iterative Solver for Uintah Combustion Codes on Manycore Architectures Using MPI Endpoints and Kernel Consolidation. In: Krzhizhanovskaya V. et al. (eds) Computational Science – ICCS 2020. ICCS 2020. Lecture Notes in Computer Science, vol 12137. Springer, Cham. https://doi.org/10.1007/978-3-030-50371-0_13"
+This is the modified multi-threaded version of the Hypre linear solver library developed by LLNL (https://github.com/hypre-space/hypre). This version treats each thread as one MPI End Point instead of using openmp to parallelize data-parallel loops to achive faster performance. Experiments use two main components of combustion simulation done in Uintah (https://github.com/Uintah). More details are presented in "D. Sahasrabudhe, R. Zambre, A. Chandramowlishwaran, M. Berzins. In Journal of Computational Science, Springer International Publishing, pp. 101279. 2020. DOI: https://doi.org/10.1016/j.jocs.2020.101279"
 
 Hypre v2.15.1 is modified to use MPI EP.
 
