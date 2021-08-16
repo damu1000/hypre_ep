@@ -554,15 +554,27 @@ int main(int argc1, char **argv1)
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
 	xmlInput input = parseInput(argv[2], rank);
-	int num_of_threads = input.xthreads * input.ythreads * input.zthreads;
+	int num_of_threads = input.xthreads * input.ythreads * input.zthreads; //these are actually number of teams
 
 
 	if(rank ==0) printf("Number of teams %d, threads per team %d\n", num_of_threads, input.team_size);
 
 	assignPatchToEP(input, rank, size, num_of_threads); //assuming EP.
 
+	hypre_set_num_threads(num_of_threads, input.team_size, get_custom_team_id);
 
-	custom_thread_driver(num_of_threads, input.team_size, HypreDriver, exp_type, input);
+#ifdef USE_FUNNELLED_COMM
+	num_of_threads++;
+#endif
+
+	custom_partition_master(num_of_threads, input.team_size, [&](int t){
+		int thread_id = hypre_init_thread();
+		if(thread_id>=0){	//main thread manages comm, others execute hypre code.
+			hypre_solve(exp_type, input);
+		}
+	});
+
+	//custom_thread_driver(num_of_threads, input.team_size, HypreDriver, exp_type, input);
 
 
 	if(rank ==0) printf("Solved successfully\n");

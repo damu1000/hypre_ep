@@ -29,18 +29,18 @@ int hypre_iterations: FIXED number of CG iterations in hypre. default 20.
 
 <input>
 
-<patch_size>16</patch_size>
-<xpatches>4</xpatches>
-<ypatches>2</ypatches>
-<zpatches>2</zpatches>
+<patch_size>64</patch_size>
+<xpatches>8</xpatches>
+<ypatches>4</ypatches>
+<zpatches>4</zpatches>
 
 <!--Total number of threads = 8. So if 2 ranks are spawned, there will be 1 patch per core (assuming 1 core available for 1 thread)-->
-<xthreads>2</xthreads>
+<xthreads>4</xthreads>
 <ythreads>2</ythreads>
-<zthreads>1</zthreads>
-<team_size>2</team_size>
+<zthreads>2</zthreads>
+<team_size>4</team_size>
 
-<hypre_iterations>20</hypre_iterations>
+<hypre_iterations>60</hypre_iterations>
 
 <verify>0</verify>
 <timesteps>5</timesteps>

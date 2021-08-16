@@ -1,9 +1,13 @@
 #!/bin/bash
-export MPICH_CXX=nvcc_wrapper
-mpicxx hypre_cpu.cc -std=c++11 -I/home/damodars/uintah_kokkos_dev/hypre/hypre_cpu/build/include/ -L/home/damodars/uintah_kokkos_dev/hypre/hypre_cpu/build/lib -lHYPRE -g -O3 -I$KOKKOS_PATH/build/include -L$KOKKOS_PATH/build/lib -lkokkos --expt-extended-lambda -o 1_cpu -fopenmp &
 
-#mpicxx hypre_gpu.cc -std=c++11 -I/home/damodars/uintah_kokkos_dev/hypre/hypre_kokkos/src/build/include/ -L/home/damodars/uintah_kokkos_dev/hypre/hypre_kokkos/src/build/lib -lHYPRE -g -O3 -I$KOKKOS_PATH/build/include -L$KOKKOS_PATH/build/lib -lkokkos --expt-extended-lambda -o gpu_kokkos -arch=sm_52 -fopenmp &
+export LIB_XML_INCLUDE=/usr/include/libxml2
+export HYPRE_CPU=/home/sci/damodars/hypre_ep_reproduce/hypre_cpu/src/build
 
-mpicxx hypre_gpu.cc -std=c++11 -I/home/damodars/hypre_project/hypre_cuda/build/include/ -L/home/damodars/hypre_project/hypre_cuda/build/lib -lHYPRE -g -O3 -I$KOKKOS_PATH/build/include -L$KOKKOS_PATH/build/lib -lkokkos --expt-extended-lambda -o 2_cuda_orig -arch=sm_52 -lcusparse -lcudart -lcublas -lnvToolsExt -fopenmp &
+mpicxx hypre_cpu.cc -std=c++11 -I$HYPRE_CPU/include/ -L$HYPRE_CPU/lib -lHYPRE -I$LIB_XML_INCLUDE -lxml2 -g -O2 -xMIC-AVX512 -o 1_cpu -fopenmp 
 
-mpicxx hypre_gpu_ep.cc -std=c++11 -I/home/damodars/uintah_kokkos_dev/hypre/hypre_cuda/src/build/include/ -I/home/damodars/uintah_kokkos_dev/hypre/hypre_cuda/src -L/home/damodars/uintah_kokkos_dev/hypre/hypre_cuda/src/build/lib -lHYPRE -g -O3 -I$KOKKOS_PATH/build/include -L$KOKKOS_PATH/build/lib -lkokkos --expt-extended-lambda -o 3_cuda_ep -arch=sm_52 -lcusparse -lcudart -lcublas -lnvToolsExt -fopenmp --default-stream per-thread
+export HYPRE_EP=/home/sci/damodars/hypre_ep_reproduce/hypre_ep/src/build
+export HYPRE_EP_SRC=/home/sci/damodars/hypre_ep_reproduce/hypre_ep/src
+
+mpicxx hypre_cpu_custom_ep.cc -std=c++11 -I$HYPRE_EP/include/ -I$HYPRE_EP_SRC -L$HYPRE_EP/lib -lHYPRE -I$LIB_XML_INCLUDE -lxml2 -g -O2 -xMIC-AVX512 -o 2_ep -fopenmp -DUSE_SIMD
+
+
